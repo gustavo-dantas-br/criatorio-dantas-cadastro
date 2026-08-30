@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Bird, Plus, Search, GitBranch, Tag, Upload, Trash2, X, Loader2, Save, Download, Feather, DollarSign, LogOut } from "lucide-react";
+import {
+  Bird, Plus, Search, GitBranch, Tag, Upload, Trash2, X, Loader2, Save,
+  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna,
+} from "lucide-react";
 import { supabase } from "./supabaseClient";
-import { listRows, saveRow, deleteRow } from "./lib/db";
+import { listRows, saveRow, deleteRow, uid } from "./lib/db";
 import AuthPage from "./components/AuthPage";
 
 // ---------------------------------------------------------------------------
-// Design tokens (see inline <style> for fonts)
+// Design tokens (ver <style> abaixo)
 // bg base:      #2B1D14  (walnut, header/sidebar)
 // panel:        #FAF3E6  (parchment card)
-// panel-alt:    #F1E6D2
 // accent gold:  #C69A2E
 // accent rust:  #A6402B
 // accent sage:  #6E7B57
@@ -20,10 +22,14 @@ const SEXOS = ["Macho", "Femea", "Indefinido"];
 const STATUS_AVE = ["No plantel", "A venda", "Reservada", "Vendida", "Falecida"];
 const ORIGEM_TIPOS = ["Nasceu no plantel", "Comprada"];
 const DESPESA_TIPOS = ["Racao", "Veterinario/Medicamento", "Gaiola/Equipamento", "Anilha", "Outro"];
-
-function uid() {
-  return (crypto.randomUUID ? crypto.randomUUID() : "ave-" + Date.now() + "-" + Math.random().toString(16).slice(2));
-}
+const TIPOS_HERANCA = [
+  "Autossomica recessiva",
+  "Autossomica dominante",
+  "Ligada ao sexo (recessiva)",
+  "Ligada ao sexo (dominante)",
+  "Codominante",
+  "Nao definido / em estudo",
+];
 
 function emptyAve() {
   return {
@@ -61,20 +67,27 @@ function emptyAve() {
     compradorEndereco: "",
     valorVenda: "",
     dataVenda: "",
+    criadoEm: "",
   };
 }
 
 function emptyDespesa() {
+  return { id: null, tipo: "Racao", descricao: "", valor: "", data: "" };
+}
+
+function emptyMutacao() {
   return {
     id: null,
-    tipo: "Racao",
-    descricao: "",
-    valor: "",
-    data: "",
+    nome: "",
+    nomeAlternativo: "",
+    tipoHeranca: "Autossomica recessiva",
+    combinaCom: "",
+    comoIdentificar: "",
+    observacoes: "",
   };
 }
 
-// ---------- Photo compression ----------
+// ---------- Compressao de foto ----------
 function compressPhoto(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -97,7 +110,6 @@ function compressPhoto(file) {
         ctx.drawImage(img, 0, 0, width, height);
         let quality = 0.72;
         let dataUrl = canvas.toDataURL("image/jpeg", quality);
-        // se ainda ficar pesada, comprime mais um pouco
         while (dataUrl.length > 900000 && quality > 0.35) {
           quality -= 0.12;
           dataUrl = canvas.toDataURL("image/jpeg", quality);
@@ -112,7 +124,7 @@ function compressPhoto(file) {
   });
 }
 
-// ---------- Plaque canvas drawing ----------
+// ---------- Desenho da placa (Canvas) ----------
 function drawWood(ctx, w, h) {
   const grad = ctx.createLinearGradient(0, 0, 0, h);
   grad.addColorStop(0, "#8a5a34");
@@ -129,7 +141,6 @@ function drawWood(ctx, w, h) {
     ctx.lineTo(w, y);
     ctx.stroke();
   }
-  // vignette
   const rg = ctx.createRadialGradient(w * 0.5, h * 0.5, h * 0.2, w * 0.5, h * 0.5, w * 0.75);
   rg.addColorStop(0, "rgba(0,0,0,0)");
   rg.addColorStop(1, "rgba(0,0,0,0.35)");
@@ -199,7 +210,6 @@ function drawPlaque(canvas, ave, photoImg) {
 
   const photoW = Math.round(W * 0.37);
 
-  // jagged clip path for the photo
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(0, 0);
@@ -216,7 +226,7 @@ function drawPlaque(canvas, ave, photoImg) {
     const scale = Math.max(photoW / photoImg.width, H / photoImg.height);
     const dw = photoImg.width * scale;
     const dh = photoImg.height * scale;
-    ctx.drawImage(photoImg, (photoW - dw) / 2, (H * 0.32) - dh * 0.32, dw, dh);
+    ctx.drawImage(photoImg, (photoW - dw) / 2, H * 0.32 - dh * 0.32, dw, dh);
   } else {
     ctx.fillStyle = "#3a2a1c";
     ctx.fillRect(0, 0, photoW, H);
@@ -266,13 +276,31 @@ function drawPlaque(canvas, ave, photoImg) {
   ctx.fillText(footer, W - fw - 16, H - 20);
 }
 
+// ---------- Financeiro (funcao compartilhada entre Dashboard e Financeiro) ----------
+function computeFinanceiro(aves, despesas) {
+  const totalCompras = aves.reduce((s, a) => s + (a.origemTipo === "Comprada" ? parseFloat(a.valorCompra) || 0 : 0), 0);
+  const totalVendas = aves.reduce((s, a) => s + (a.status === "Vendida" ? parseFloat(a.valorVenda) || 0 : 0), 0);
+  const totalDespesas = despesas.reduce((s, d) => s + (parseFloat(d.valor) || 0), 0);
+  const totalInvestido = totalCompras + totalDespesas;
+  const lucro = totalVendas - totalInvestido;
+  const avesVendidas = aves.filter((a) => a.status === "Vendida").length;
+  return { totalCompras, totalVendas, totalDespesas, totalInvestido, lucro, avesVendidas };
+}
+
+function money(n) {
+  const v = parseFloat(n);
+  if (isNaN(v)) return "R$ 0,00";
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
 // ---------------------------------------------------------------------------
 
 function AppInner({ user, onLogout }) {
   const [aves, setAves] = useState([]);
   const [despesas, setDespesas] = useState([]);
+  const [mutacoes, setMutacoes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("lista");
+  const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(emptyAve());
   const [saving, setSaving] = useState(false);
@@ -299,14 +327,24 @@ function AppInner({ user, onLogout }) {
       const items = await listRows("despesas", user.id);
       setDespesas(items.map((d) => ({ ...d, synced: true })).sort((a, b) => (a.data || "").localeCompare(b.data || "")));
     } catch {
-      // silencioso - despesas nao sao criticas pro cadastro funcionar
+      // silencioso
+    }
+  }, [user.id]);
+
+  const loadMutacoes = useCallback(async () => {
+    try {
+      const items = await listRows("mutacoes", user.id);
+      setMutacoes(items.map((m) => ({ ...m, synced: true })).sort((a, b) => (a.nome || "").localeCompare(b.nome || "")));
+    } catch {
+      // silencioso - se a tabela ainda nao existir no banco, so fica vazio
     }
   }, [user.id]);
 
   useEffect(() => {
     loadAves();
     loadDespesas();
-  }, [loadAves, loadDespesas]);
+    loadMutacoes();
+  }, [loadAves, loadDespesas, loadMutacoes]);
 
   function startNew() {
     setForm(emptyAve());
@@ -326,16 +364,14 @@ function AppInner({ user, onLogout }) {
     setSaving(true);
     setError("");
     const id = form.id || uid();
-    const toSave = { ...form, id };
+    const toSave = { ...form, id, criadoEm: form.criadoEm || new Date().toISOString() };
 
-    // 1) Atualiza a tela na hora (otimista)
     setAves((prev) => {
       const others = prev.filter((a) => a.id !== id);
       return [...others, { ...toSave, synced: false }].sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
     });
     setTab("lista");
 
-    // 2) Salva de verdade no banco (Supabase)
     try {
       await saveRow("aves", user.id, toSave);
       setAves((prev) => prev.map((a) => (a.id === id ? { ...a, synced: true } : a)));
@@ -357,6 +393,101 @@ function AppInner({ user, onLogout }) {
     } catch (e) {
       setError(`Ainda nao consegui sincronizar "${ave.nome}" (${e?.message || "erro desconhecido"}).`);
     }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm("Remover essa ave do cadastro?")) return;
+    setAves((prev) => prev.filter((a) => a.id !== id));
+    try {
+      await deleteRow("aves", id);
+    } catch {
+      setError("Removida da lista, mas pode ainda existir no banco (falha de conexao). Sem problema, ela nao vai reaparecer aqui.");
+    }
+  }
+
+  async function handlePhoto(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await compressPhoto(file);
+      setForm((f) => ({ ...f, foto: dataUrl }));
+    } catch {
+      setError("Nao consegui processar essa foto.");
+    }
+  }
+
+  async function handleSaveDespesa(despesa) {
+    const id = despesa.id || uid();
+    const toSave = { ...despesa, id };
+    setDespesas((prev) => {
+      const others = prev.filter((d) => d.id !== id);
+      return [...others, { ...toSave, synced: false }].sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+    });
+    try {
+      await saveRow("despesas", user.id, toSave);
+      setDespesas((prev) => prev.map((d) => (d.id === id ? { ...d, synced: true } : d)));
+    } catch (e) {
+      setError(`Despesa ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}).`);
+    }
+  }
+
+  async function handleDeleteDespesa(id) {
+    setDespesas((prev) => prev.filter((d) => d.id !== id));
+    try {
+      await deleteRow("despesas", id);
+    } catch {
+      // ja removida localmente
+    }
+  }
+
+  async function handleSaveMutacao(mutacao) {
+    if (!mutacao.nome.trim()) return;
+    const id = mutacao.id || uid();
+    const toSave = { ...mutacao, id };
+    setMutacoes((prev) => {
+      const others = prev.filter((m) => m.id !== id);
+      return [...others, { ...toSave, synced: false }].sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    });
+    try {
+      await saveRow("mutacoes", user.id, toSave);
+      setMutacoes((prev) => prev.map((m) => (m.id === id ? { ...m, synced: true } : m)));
+    } catch (e) {
+      setError(
+        `Mutacao ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}). ` +
+        "Se a tabela 'mutacoes' ainda nao existe no seu Supabase, roda o novo schema_fase2.sql no SQL Editor."
+      );
+    }
+  }
+
+  async function handleDeleteMutacao(id) {
+    setMutacoes((prev) => prev.filter((m) => m.id !== id));
+    try {
+      await deleteRow("mutacoes", id);
+    } catch {
+      // ja removida localmente
+    }
+  }
+
+  useEffect(() => {
+    if (tab !== "placa" || !placaId) return;
+    const ave = aves.find((a) => a.id === placaId);
+    if (!ave || !canvasRef.current) return;
+    if (ave.foto) {
+      const img = new Image();
+      img.onload = () => drawPlaque(canvasRef.current, ave, img);
+      img.src = ave.foto;
+    } else {
+      drawPlaque(canvasRef.current, ave, null);
+    }
+  }, [tab, placaId, aves]);
+
+  function downloadPlaca() {
+    if (!canvasRef.current) return;
+    const ave = aves.find((a) => a.id === placaId);
+    const link = document.createElement("a");
+    link.download = `placa_${(ave?.nome || "ave").replace(/\s+/g, "_")}.png`;
+    link.href = canvasRef.current.toDataURL("image/png");
+    link.click();
   }
 
   function handleExport() {
@@ -387,74 +518,6 @@ function AppInner({ user, onLogout }) {
     } finally {
       e.target.value = "";
     }
-  }
-
-  async function handleSaveDespesa(despesa) {
-    const id = despesa.id || uid();
-    const toSave = { ...despesa, id };
-    setDespesas((prev) => {
-      const others = prev.filter((d) => d.id !== id);
-      return [...others, { ...toSave, synced: false }].sort((a, b) => (a.data || "").localeCompare(b.data || ""));
-    });
-    try {
-      await saveRow("despesas", user.id, toSave);
-      setDespesas((prev) => prev.map((d) => (d.id === id ? { ...d, synced: true } : d)));
-    } catch (e) {
-      setError(`Despesa ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}).`);
-    }
-  }
-
-  async function handleDeleteDespesa(id) {
-    setDespesas((prev) => prev.filter((d) => d.id !== id));
-    try {
-      await deleteRow("despesas", id);
-    } catch {
-      // ja removida localmente
-    }
-  }
-
-  async function handleDelete(id) {
-    if (!confirm("Remover essa ave do cadastro?")) return;
-    setAves((prev) => prev.filter((a) => a.id !== id));
-    try {
-      await deleteRow("aves", id);
-    } catch {
-      setError("Removida da lista, mas pode ainda existir no banco (falha de conexao). Sem problema, ela nao vai reaparecer aqui.");
-    }
-  }
-
-  async function handlePhoto(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const dataUrl = await compressPhoto(file);
-      setForm((f) => ({ ...f, foto: dataUrl }));
-    } catch {
-      setError("Nao consegui processar essa foto.");
-    }
-  }
-
-  // ---- Placa tab: redraw canvas on selection ----
-  useEffect(() => {
-    if (tab !== "placa" || !placaId) return;
-    const ave = aves.find((a) => a.id === placaId);
-    if (!ave || !canvasRef.current) return;
-    if (ave.foto) {
-      const img = new Image();
-      img.onload = () => drawPlaque(canvasRef.current, ave, img);
-      img.src = ave.foto;
-    } else {
-      drawPlaque(canvasRef.current, ave, null);
-    }
-  }, [tab, placaId, aves]);
-
-  function downloadPlaca() {
-    if (!canvasRef.current) return;
-    const ave = aves.find((a) => a.id === placaId);
-    const link = document.createElement("a");
-    link.download = `placa_${(ave?.nome || "ave").replace(/\s+/g, "_")}.png`;
-    link.href = canvasRef.current.toDataURL("image/png");
-    link.click();
   }
 
   const filtered = aves.filter((a) => {
@@ -501,11 +564,13 @@ function AppInner({ user, onLogout }) {
 
         <nav className="flex flex-row md:flex-col gap-1 overflow-x-auto md:overflow-visible flex-1 md:flex-none">
           {[
+            { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
             { id: "lista", label: "Aves", icon: Bird },
             { id: "form", label: "Cadastrar", icon: Plus },
             { id: "arvore", label: "Arvore", icon: GitBranch },
             { id: "placa", label: "Placa", icon: Tag },
             { id: "financeiro", label: "Financeiro", icon: DollarSign },
+            { id: "mutacoes", label: "Genetica", icon: Dna },
           ].map(({ id, label: lbl, icon: Icon }) => (
             <button
               key={id}
@@ -528,11 +593,7 @@ function AppInner({ user, onLogout }) {
             {aves.length} {aves.length === 1 ? "ave cadastrada" : "aves cadastradas"}
           </div>
           <div className="ui-mono text-[10px] truncate" style={{ color: "#5a4a30" }}>{user.email}</div>
-          <button
-            onClick={onLogout}
-            className="ui-sans flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg self-start"
-            style={{ color: "#b09a78" }}
-          >
+          <button onClick={onLogout} className="ui-sans flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg self-start" style={{ color: "#b09a78" }}>
             <LogOut size={13} /> Sair
           </button>
         </div>
@@ -553,64 +614,38 @@ function AppInner({ user, onLogout }) {
           </div>
         ) : (
           <>
+            {tab === "dashboard" && <DashboardTab aves={aves} despesas={despesas} setTab={setTab} />}
+
             {tab === "lista" && (
               <ListaTab
-                aves={filtered}
-                search={search}
-                setSearch={setSearch}
-                onEdit={startEdit}
-                onDelete={handleDelete}
-                onNew={startNew}
-                onSync={handleSync}
-                onExport={handleExport}
-                onImport={handleImport}
+                aves={filtered} search={search} setSearch={setSearch}
+                onEdit={startEdit} onDelete={handleDelete} onNew={startNew}
+                onSync={handleSync} onExport={handleExport} onImport={handleImport}
               />
             )}
 
             {tab === "form" && (
               <FormTab
-                form={form}
-                setForm={setForm}
-                onSave={handleSave}
-                onPhoto={handlePhoto}
-                saving={saving}
-                machoOptions={machoOptions}
-                femeaOptions={femeaOptions}
-                parceiroOptions={parceiroOptions}
-                onCancel={() => setTab("lista")}
+                form={form} setForm={setForm} onSave={handleSave} onPhoto={handlePhoto} saving={saving}
+                machoOptions={machoOptions} femeaOptions={femeaOptions} parceiroOptions={parceiroOptions}
+                mutacoes={mutacoes} onCancel={() => setTab("lista")}
               />
             )}
 
             {tab === "arvore" && (
-              <ArvoreTab
-                aves={aves}
-                arvoreId={arvoreId}
-                setArvoreId={setArvoreId}
-                arvoreAve={arvoreAve}
-                pai={pai}
-                mae={mae}
-                parceiro={parceiro}
-                filhos={filhos}
-              />
+              <ArvoreTab aves={aves} arvoreId={arvoreId} setArvoreId={setArvoreId} arvoreAve={arvoreAve} pai={pai} mae={mae} parceiro={parceiro} filhos={filhos} />
             )}
 
             {tab === "placa" && (
-              <PlacaTab
-                aves={aves}
-                placaId={placaId}
-                setPlacaId={setPlacaId}
-                canvasRef={canvasRef}
-                onDownload={downloadPlaca}
-              />
+              <PlacaTab aves={aves} placaId={placaId} setPlacaId={setPlacaId} canvasRef={canvasRef} onDownload={downloadPlaca} />
             )}
 
             {tab === "financeiro" && (
-              <FinanceiroTab
-                aves={aves}
-                despesas={despesas}
-                onSaveDespesa={handleSaveDespesa}
-                onDeleteDespesa={handleDeleteDespesa}
-              />
+              <FinanceiroTab aves={aves} despesas={despesas} onSaveDespesa={handleSaveDespesa} onDeleteDespesa={handleDeleteDespesa} />
+            )}
+
+            {tab === "mutacoes" && (
+              <MutacoesTab mutacoes={mutacoes} onSave={handleSaveMutacao} onDelete={handleDeleteMutacao} />
             )}
           </>
         )}
@@ -619,6 +654,8 @@ function AppInner({ user, onLogout }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Componentes de UI compartilhados
 // ---------------------------------------------------------------------------
 
 function Card({ children, className = "" }) {
@@ -630,12 +667,126 @@ function Card({ children, className = "" }) {
 }
 
 function SectionTitle({ children }) {
+  return <h2 className="mb-5" style={{ color: "#F1E6D2", fontSize: 24, fontWeight: 700 }}>{children}</h2>;
+}
+
+const inputStyle = {
+  background: "#fff",
+  border: "1px solid #e3d3b4",
+  color: "#2B241C",
+  borderRadius: 8,
+  padding: "8px 10px",
+  fontSize: 14,
+  outline: "none",
+};
+
+function Field({ label: lbl, children }) {
   return (
-    <h2 className="mb-5" style={{ color: "#F1E6D2", fontSize: 24, fontWeight: 700 }}>
+    <label className="flex flex-col gap-1.5 ui-sans">
+      <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8a7a63" }}>{lbl}</span>
       {children}
-    </h2>
+    </label>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Dashboard (Fase 2)
+// ---------------------------------------------------------------------------
+
+function StatCard({ label: lbl, value, tone = "default", onClick }) {
+  const tones = {
+    default: { bg: "#FAF3E6", color: "#2B241C" },
+    bad: { bg: "#f0dad4", color: "#a6402b" },
+    good: { bg: "#e4ead9", color: "#556b3f" },
+    gold: { bg: "#f5e9c8", color: "#8a6f2e" },
+  };
+  const t = tones[tone];
+  return (
+    <button
+      onClick={onClick}
+      className="rounded-xl p-4 text-left w-full"
+      style={{ background: t.bg, border: "1px solid #e3d3b4", cursor: onClick ? "pointer" : "default" }}
+    >
+      <div className="ui-mono text-[11px] uppercase tracking-wide mb-1" style={{ color: "#8a7a63" }}>{lbl}</div>
+      <div className="text-2xl font-bold" style={{ color: t.color, fontFamily: "'Fraunces', serif" }}>{value}</div>
+    </button>
+  );
+}
+
+function DashboardTab({ aves, despesas, setTab }) {
+  const total = aves.length;
+  const machos = aves.filter((a) => a.sexo === "Macho").length;
+  const femeas = aves.filter((a) => a.sexo === "Femea").length;
+  const indefinidos = aves.filter((a) => a.sexo === "Indefinido").length;
+  const casais = new Set(aves.filter((a) => a.casalLabel?.trim()).map((a) => a.casalLabel.trim())).size;
+  const disponiveis = aves.filter((a) => a.status === "A venda").length;
+  const vendidas = aves.filter((a) => a.status === "Vendida").length;
+  const falecidas = aves.filter((a) => a.status === "Falecida").length;
+  const semSexagem = aves.filter((a) => !a.sexado).length;
+  const naoSincronizadas = aves.filter((a) => a.synced === false).length;
+
+  const fin = computeFinanceiro(aves, despesas);
+
+  const ultimasCadastradas = [...aves]
+    .sort((a, b) => (b.criadoEm || "").localeCompare(a.criadoEm || ""))
+    .slice(0, 5);
+
+  return (
+    <div>
+      <SectionTitle>Dashboard</SectionTitle>
+
+      <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
+        <StatCard label="Total de aves" value={total} onClick={() => setTab("lista")} />
+        <StatCard label="Machos" value={machos} />
+        <StatCard label="Femeas" value={femeas} />
+        <StatCard label="Sexo indefinido" value={indefinidos} />
+        <StatCard label="Casais" value={casais} />
+        <StatCard label="A venda" value={disponiveis} tone="gold" />
+        <StatCard label="Vendidas" value={vendidas} tone="good" />
+        <StatCard label="Falecidas" value={falecidas} tone="bad" />
+      </div>
+
+      <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+        <StatCard label="Total investido" value={money(fin.totalInvestido)} tone="bad" onClick={() => setTab("financeiro")} />
+        <StatCard label="Total vendido" value={money(fin.totalVendas)} tone="good" onClick={() => setTab("financeiro")} />
+        <StatCard label={fin.lucro >= 0 ? "Lucro" : "Prejuizo"} value={money(Math.abs(fin.lucro))} tone={fin.lucro >= 0 ? "good" : "bad"} onClick={() => setTab("financeiro")} />
+      </div>
+
+      {(semSexagem > 0 || naoSincronizadas > 0) && (
+        <Card className="p-4 mb-6">
+          <div className="ui-mono text-xs mb-2" style={{ color: "#8a7a63" }}>ALERTAS</div>
+          <div className="flex flex-col gap-1 ui-sans text-sm" style={{ color: "#2B241C" }}>
+            {semSexagem > 0 && <div>⚠️ {semSexagem} {semSexagem === 1 ? "ave esta" : "aves estao"} sem laudo de sexagem.</div>}
+            {naoSincronizadas > 0 && <div>⚠️ {naoSincronizadas} {naoSincronizadas === 1 ? "ave nao sincronizou" : "aves nao sincronizaram"} com o banco ainda.</div>}
+          </div>
+        </Card>
+      )}
+
+      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>ULTIMAS CADASTRADAS</div>
+      {ultimasCadastradas.length === 0 ? (
+        <Card className="p-6 text-center ui-sans" style={{ color: "#8a7a63" }}>Nenhuma ave cadastrada ainda.</Card>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {ultimasCadastradas.map((a) => (
+            <Card key={a.id} className="p-3 flex items-center gap-3 ui-sans">
+              <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
+                {a.foto ? <img src={a.foto} className="w-full h-full object-cover" alt="" /> : null}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{a.nome}</div>
+                <div className="text-xs" style={{ color: "#8a7a63" }}>{a.especie} - {a.status}</div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Lista
+// ---------------------------------------------------------------------------
 
 function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, onExport, onImport }) {
   const pendentes = aves.filter((a) => a.synced === false).length;
@@ -644,24 +795,13 @@ function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, on
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <SectionTitle>Minhas Aves</SectionTitle>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={onNew}
-            className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shrink-0"
-            style={{ background: "#C69A2E", color: "#2B1D14" }}
-          >
+          <button onClick={onNew} className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold shrink-0" style={{ background: "#C69A2E", color: "#2B1D14" }}>
             <Plus size={16} /> Nova ave
           </button>
-          <button
-            onClick={onExport}
-            className="ui-sans flex items-center gap-2 px-3 py-2 rounded-lg text-sm shrink-0"
-            style={{ background: "#e3d3b4", color: "#2B241C" }}
-          >
+          <button onClick={onExport} className="ui-sans flex items-center gap-2 px-3 py-2 rounded-lg text-sm shrink-0" style={{ background: "#e3d3b4", color: "#2B241C" }}>
             <Download size={15} /> Backup
           </button>
-          <label
-            className="ui-sans flex items-center gap-2 px-3 py-2 rounded-lg text-sm shrink-0 cursor-pointer"
-            style={{ background: "#e3d3b4", color: "#2B241C" }}
-          >
+          <label className="ui-sans flex items-center gap-2 px-3 py-2 rounded-lg text-sm shrink-0 cursor-pointer" style={{ background: "#e3d3b4", color: "#2B241C" }}>
             <Upload size={15} /> Importar
             <input type="file" accept="application/json" className="hidden" onChange={onImport} />
           </label>
@@ -677,8 +817,7 @@ function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, on
       <div className="relative mb-6 max-w-sm">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#8a7a63" }} />
         <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="Buscar por nome, anilha ou especie..."
           className="ui-sans w-full pl-9 pr-3 py-2 rounded-lg text-sm outline-none"
           style={{ background: "#FAF3E6", border: "1px solid #e3d3b4", color: "#2B241C" }}
@@ -694,21 +833,14 @@ function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, on
           {aves.map((a) => (
             <Card key={a.id} className="overflow-hidden flex">
               <div className="w-24 shrink-0" style={{ background: "#3a2a1c" }}>
-                {a.foto ? (
-                  <img src={a.foto} alt={a.nome} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <Bird size={22} color="#8a7a63" />
-                  </div>
+                {a.foto ? <img src={a.foto} alt={a.nome} className="w-full h-full object-cover" /> : (
+                  <div className="w-full h-full flex items-center justify-center"><Bird size={22} color="#8a7a63" /></div>
                 )}
               </div>
               <div className="flex-1 p-3 ui-sans min-w-0">
                 <div className="flex items-start justify-between gap-2">
                   <div className="font-semibold truncate" style={{ color: "#2B241C" }}>{a.nome}</div>
-                  <span
-                    className="ui-mono text-[10px] px-1.5 py-0.5 rounded shrink-0"
-                    style={{ background: a.sexado ? "#e4ead9" : "#f0e6d2", color: a.sexado ? "#556b3f" : "#8a6f2e" }}
-                  >
+                  <span className="ui-mono text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ background: a.sexado ? "#e4ead9" : "#f0e6d2", color: a.sexado ? "#556b3f" : "#8a6f2e" }}>
                     {a.sexado ? "SEXADO" : "S/ SEXAGEM"}
                   </span>
                 </div>
@@ -716,26 +848,14 @@ function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, on
                 <div className="text-xs" style={{ color: "#7a6a52" }}>{a.corMutacao || "sem mutacao"}</div>
                 <div className="ui-mono text-[11px] mt-1" style={{ color: "#a6402b" }}>{a.anilha || "sem anilha"}</div>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[10px] px-1.5 py-0.5 rounded ui-mono" style={{ background: "#e3d3b4", color: "#5a4a30" }}>
-                    {a.status || "No plantel"}
-                  </span>
-                  {a.status === "Vendida" && a.valorVenda && (
-                    <span className="text-[10px] ui-mono" style={{ color: "#556b3f" }}>R$ {a.valorVenda}</span>
-                  )}
+                  <span className="text-[10px] px-1.5 py-0.5 rounded ui-mono" style={{ background: "#e3d3b4", color: "#5a4a30" }}>{a.status || "No plantel"}</span>
+                  {a.status === "Vendida" && a.valorVenda && <span className="text-[10px] ui-mono" style={{ color: "#556b3f" }}>R$ {a.valorVenda}</span>}
                 </div>
-                {a.synced === false && (
-                  <div className="text-[10px] mt-1 font-semibold" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</div>
-                )}
+                {a.synced === false && <div className="text-[10px] mt-1 font-semibold" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</div>}
                 <div className="flex flex-wrap gap-2 mt-2">
                   <button onClick={() => onEdit(a)} className="text-xs px-2 py-1 rounded" style={{ background: "#e3d3b4", color: "#2B241C" }}>Editar</button>
-                  <button onClick={() => onDelete(a.id)} className="text-xs px-2 py-1 rounded flex items-center gap-1" style={{ background: "#f0dad4", color: "#a6402b" }}>
-                    <Trash2 size={12} /> Remover
-                  </button>
-                  {a.synced === false && (
-                    <button onClick={() => onSync(a)} className="text-xs px-2 py-1 rounded" style={{ background: "#e4ead9", color: "#556b3f" }}>
-                      Sincronizar
-                    </button>
-                  )}
+                  <button onClick={() => onDelete(a.id)} className="text-xs px-2 py-1 rounded flex items-center gap-1" style={{ background: "#f0dad4", color: "#a6402b" }}><Trash2 size={12} /> Remover</button>
+                  {a.synced === false && <button onClick={() => onSync(a)} className="text-xs px-2 py-1 rounded" style={{ background: "#e4ead9", color: "#556b3f" }}>Sincronizar</button>}
                 </div>
               </div>
             </Card>
@@ -746,26 +866,11 @@ function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, on
   );
 }
 
-function Field({ label: lbl, children }) {
-  return (
-    <label className="flex flex-col gap-1.5 ui-sans">
-      <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "#8a7a63" }}>{lbl}</span>
-      {children}
-    </label>
-  );
-}
+// ---------------------------------------------------------------------------
+// Formulario de ave
+// ---------------------------------------------------------------------------
 
-const inputStyle = {
-  background: "#fff",
-  border: "1px solid #e3d3b4",
-  color: "#2B241C",
-  borderRadius: 8,
-  padding: "8px 10px",
-  fontSize: 14,
-  outline: "none",
-};
-
-function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOptions, parceiroOptions, onCancel }) {
+function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOptions, parceiroOptions, mutacoes, onCancel }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target?.type === "checkbox" ? e.target.checked : e.target.value }));
 
   return (
@@ -780,71 +885,48 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
               <input type="file" accept="image/*" className="hidden" onChange={onPhoto} />
             </label>
             {form.foto && (
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, foto: "" }))}
-                className="absolute top-1 right-1 p-1 rounded-full"
-                style={{ background: "#A6402B" }}
-                title="Remover foto"
-              >
+              <button type="button" onClick={() => setForm((f) => ({ ...f, foto: "" }))} className="absolute top-1 right-1 p-1 rounded-full" style={{ background: "#A6402B" }} title="Remover foto">
                 <X size={12} color="#fff" />
               </button>
             )}
           </div>
           <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Nome">
-              <input style={inputStyle} value={form.nome} onChange={set("nome")} placeholder="ex: Princesa" />
-            </Field>
+            <Field label="Nome"><input style={inputStyle} value={form.nome} onChange={set("nome")} placeholder="ex: Princesa" /></Field>
             <Field label="Especie">
-              <select style={inputStyle} value={form.especie} onChange={set("especie")}>
-                {ESPECIES.map((e) => <option key={e}>{e}</option>)}
-              </select>
+              <select style={inputStyle} value={form.especie} onChange={set("especie")}>{ESPECIES.map((e) => <option key={e}>{e}</option>)}</select>
             </Field>
             <Field label="Sexo">
-              <select style={inputStyle} value={form.sexo} onChange={set("sexo")}>
-                {SEXOS.map((s) => <option key={s}>{s}</option>)}
-              </select>
+              <select style={inputStyle} value={form.sexo} onChange={set("sexo")}>{SEXOS.map((s) => <option key={s}>{s}</option>)}</select>
             </Field>
             <Field label="Mutacao / Cor">
-              <input style={inputStyle} value={form.corMutacao} onChange={set("corMutacao")} placeholder="ex: Cremina" />
+              <input style={inputStyle} list="lista-mutacoes" value={form.corMutacao} onChange={set("corMutacao")} placeholder="ex: Cremina" />
+              <datalist id="lista-mutacoes">
+                {mutacoes.map((m) => <option key={m.id} value={m.nome} />)}
+              </datalist>
             </Field>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-          <Field label="Numero da anilha">
-            <input style={inputStyle} value={form.anilha} onChange={set("anilha")} placeholder="ex: FOB 0080" />
-          </Field>
-          <Field label="Cor da anilha">
-            <input style={inputStyle} value={form.corAnilha} onChange={set("corAnilha")} placeholder="ex: azul 2024" />
-          </Field>
-          <Field label="Nascimento">
-            <input style={inputStyle} value={form.nascimento} onChange={set("nascimento")} placeholder="ex: Ago/2024" />
-          </Field>
+          <Field label="Numero da anilha"><input style={inputStyle} value={form.anilha} onChange={set("anilha")} placeholder="ex: FOB 0080" /></Field>
+          <Field label="Cor da anilha"><input style={inputStyle} value={form.corAnilha} onChange={set("corAnilha")} placeholder="ex: azul 2024" /></Field>
+          <Field label="Nascimento"><input style={inputStyle} value={form.nascimento} onChange={set("nascimento")} placeholder="ex: Ago/2024" /></Field>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-          <Field label="De onde veio (origem)">
-            <input style={inputStyle} value={form.origem} onChange={set("origem")} placeholder="ex: Nascido no criatorio / comprado de..." />
-          </Field>
-          <Field label="Criador">
-            <input style={inputStyle} value={form.criador} onChange={set("criador")} />
-          </Field>
+          <Field label="De onde veio (origem)"><input style={inputStyle} value={form.origem} onChange={set("origem")} placeholder="ex: Nascido no criatorio / comprado de..." /></Field>
+          <Field label="Criador"><input style={inputStyle} value={form.criador} onChange={set("criador")} /></Field>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-          <Field label="CTF">
-            <input style={inputStyle} value={form.ctf} onChange={set("ctf")} placeholder="opcional" />
-          </Field>
+          <Field label="CTF"><input style={inputStyle} value={form.ctf} onChange={set("ctf")} placeholder="opcional" /></Field>
           <Field label="Sexagem">
             <div className="flex items-center gap-2 h-full pt-1.5">
               <input type="checkbox" checked={form.sexado} onChange={set("sexado")} />
               <span className="text-sm ui-sans" style={{ color: "#2B241C" }}>Ja tem laudo de sexagem</span>
             </div>
           </Field>
-          <Field label="Nota do laudo">
-            <input style={inputStyle} value={form.laudoNota} onChange={set("laudoNota")} placeholder="opcional" />
-          </Field>
+          <Field label="Nota do laudo"><input style={inputStyle} value={form.laudoNota} onChange={set("laudoNota")} placeholder="opcional" /></Field>
         </div>
 
         <div className="my-5 h-px" style={{ background: "#e3d3b4" }} />
@@ -852,9 +934,7 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <Field label="Status">
-            <select style={inputStyle} value={form.status} onChange={set("status")}>
-              {STATUS_AVE.map((s) => <option key={s}>{s}</option>)}
-            </select>
+            <select style={inputStyle} value={form.status} onChange={set("status")}>{STATUS_AVE.map((s) => <option key={s}>{s}</option>)}</select>
           </Field>
           <Field label="Ninhadas ja geradas (se reprodutora)">
             <input style={inputStyle} type="number" min="0" value={form.ninhadasGeradas} onChange={set("ninhadasGeradas")} placeholder="0" />
@@ -868,9 +948,7 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
         <div className="ui-mono text-xs mb-3" style={{ color: "#8a7a63" }}>AQUISICAO (COMPRA)</div>
 
         <Field label="Como essa ave chegou no plantel">
-          <select style={{ ...inputStyle, maxWidth: 280 }} value={form.origemTipo} onChange={set("origemTipo")}>
-            {ORIGEM_TIPOS.map((o) => <option key={o}>{o}</option>)}
-          </select>
+          <select style={{ ...inputStyle, maxWidth: 280 }} value={form.origemTipo} onChange={set("origemTipo")}>{ORIGEM_TIPOS.map((o) => <option key={o}>{o}</option>)}</select>
         </Field>
 
         {form.origemTipo === "Comprada" && (
@@ -908,49 +986,39 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
               {machoOptions.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
           </Field>
-          <Field label="Pai (se nao estiver no sistema)">
-            <input style={inputStyle} value={form.paiExterno} onChange={set("paiExterno")} placeholder="ex: desconhecido / de outro criador" />
-          </Field>
+          <Field label="Pai (se nao estiver no sistema)"><input style={inputStyle} value={form.paiExterno} onChange={set("paiExterno")} placeholder="ex: desconhecido / de outro criador" /></Field>
           <Field label="Mae (se estiver cadastrada)">
             <select style={inputStyle} value={form.maeId} onChange={set("maeId")}>
               <option value="">-- nenhuma --</option>
               {femeaOptions.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
           </Field>
-          <Field label="Mae (se nao estiver no sistema)">
-            <input style={inputStyle} value={form.maeExterno} onChange={set("maeExterno")} placeholder="ex: emprestada do Anderson" />
-          </Field>
+          <Field label="Mae (se nao estiver no sistema)"><input style={inputStyle} value={form.maeExterno} onChange={set("maeExterno")} placeholder="ex: emprestada do Anderson" /></Field>
           <Field label="Parceiro(a) / casal">
             <select style={inputStyle} value={form.parceiroId} onChange={set("parceiroId")}>
               <option value="">-- nenhum --</option>
               {parceiroOptions.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
           </Field>
-          <Field label="Identificacao do casal">
-            <input style={inputStyle} value={form.casalLabel} onChange={set("casalLabel")} placeholder="ex: Casal 04" />
-          </Field>
+          <Field label="Identificacao do casal"><input style={inputStyle} value={form.casalLabel} onChange={set("casalLabel")} placeholder="ex: Casal 04" /></Field>
         </div>
 
         <div className="flex gap-3 mt-6">
-          <button
-            onClick={onSave}
-            disabled={saving}
-            className="ui-sans flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold"
-            style={{ background: "#C69A2E", color: "#2B1D14" }}
-          >
-            {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-            Salvar
+          <button onClick={onSave} disabled={saving} className="ui-sans flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold" style={{ background: "#C69A2E", color: "#2B1D14" }}>
+            {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />} Salvar
           </button>
-          <button onClick={onCancel} className="ui-sans px-5 py-2.5 rounded-lg text-sm" style={{ background: "#e3d3b4", color: "#2B241C" }}>
-            Cancelar
-          </button>
+          <button onClick={onCancel} className="ui-sans px-5 py-2.5 rounded-lg text-sm" style={{ background: "#e3d3b4", color: "#2B241C" }}>Cancelar</button>
         </div>
       </Card>
     </div>
   );
 }
 
-function TreeCard({ ave, tone = "default" }) {
+// ---------------------------------------------------------------------------
+// Arvore Genealogica
+// ---------------------------------------------------------------------------
+
+function TreeCard({ ave }) {
   if (!ave) return null;
   return (
     <div className="rounded-lg px-4 py-2.5 ui-sans text-center" style={{ background: "#FAF3E6", border: "1px solid #e3d3b4", minWidth: 140 }}>
@@ -965,11 +1033,7 @@ function ArvoreTab({ aves, arvoreId, setArvoreId, arvoreAve, pai, mae, parceiro,
     <div>
       <SectionTitle>Arvore Genealogica</SectionTitle>
       <Field label="Escolha a ave">
-        <select
-          style={{ ...inputStyle, maxWidth: 320 }}
-          value={arvoreId}
-          onChange={(e) => setArvoreId(e.target.value)}
-        >
+        <select style={{ ...inputStyle, maxWidth: 320 }} value={arvoreId} onChange={(e) => setArvoreId(e.target.value)}>
           <option value="">-- selecione --</option>
           {aves.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
         </select>
@@ -979,7 +1043,7 @@ function ArvoreTab({ aves, arvoreId, setArvoreId, arvoreAve, pai, mae, parceiro,
         <Card className="p-8 mt-6">
           <div className="flex flex-col items-center gap-6 ui-sans">
             <div className="ui-mono text-xs" style={{ color: "#8a7a63" }}>PAIS</div>
-            <div className="flex gap-4">
+            <div className="flex gap-4 flex-wrap justify-center">
               <TreeCard ave={pai} />
               {!pai && arvoreAve.paiExterno && <TreeCard ave={{ nome: arvoreAve.paiExterno, especie: "externo", sexo: "Macho" }} />}
               <TreeCard ave={mae} />
@@ -993,21 +1057,14 @@ function ArvoreTab({ aves, arvoreId, setArvoreId, arvoreAve, pai, mae, parceiro,
                 <div className="font-bold">{arvoreAve.nome}</div>
                 <div className="text-[11px]">{arvoreAve.especie} - {arvoreAve.sexo}</div>
               </div>
-              {parceiro && (
-                <>
-                  <span className="text-xs" style={{ color: "#8a7a63" }}>x</span>
-                  <TreeCard ave={parceiro} />
-                </>
-              )}
+              {parceiro && (<><span className="text-xs" style={{ color: "#8a7a63" }}>x</span><TreeCard ave={parceiro} /></>)}
             </div>
 
             {filhos.length > 0 && (
               <>
                 <div className="h-6 w-px" style={{ background: "#e3d3b4" }} />
                 <div className="ui-mono text-xs" style={{ color: "#8a7a63" }}>FILHOS ({filhos.length})</div>
-                <div className="flex flex-wrap gap-3 justify-center">
-                  {filhos.map((f) => <TreeCard key={f.id} ave={f} />)}
-                </div>
+                <div className="flex flex-wrap gap-3 justify-center">{filhos.map((f) => <TreeCard key={f.id} ave={f} />)}</div>
               </>
             )}
           </div>
@@ -1017,106 +1074,10 @@ function ArvoreTab({ aves, arvoreId, setArvoreId, arvoreAve, pai, mae, parceiro,
   );
 }
 
-function money(n) {
-  const v = parseFloat(n);
-  if (isNaN(v)) return "R$ 0,00";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
+// ---------------------------------------------------------------------------
+// Placa
+// ---------------------------------------------------------------------------
 
-function SummaryCard({ label: lbl, value, tone = "default" }) {
-  const tones = {
-    default: { bg: "#FAF3E6", color: "#2B241C" },
-    bad: { bg: "#f0dad4", color: "#a6402b" },
-    good: { bg: "#e4ead9", color: "#556b3f" },
-  };
-  const t = tones[tone];
-  return (
-    <div className="rounded-xl p-4" style={{ background: t.bg, border: "1px solid #e3d3b4" }}>
-      <div className="ui-mono text-[11px] uppercase tracking-wide mb-1" style={{ color: "#8a7a63" }}>{lbl}</div>
-      <div className="text-xl font-bold" style={{ color: t.color, fontFamily: "'Fraunces', serif" }}>{value}</div>
-    </div>
-  );
-}
-
-function FinanceiroTab({ aves, despesas, onSaveDespesa, onDeleteDespesa }) {
-  const [novaDespesa, setNovaDespesa] = useState(emptyDespesa());
-
-  const totalCompras = aves.reduce((s, a) => s + (a.origemTipo === "Comprada" ? parseFloat(a.valorCompra) || 0 : 0), 0);
-  const totalVendas = aves.reduce((s, a) => s + (a.status === "Vendida" ? parseFloat(a.valorVenda) || 0 : 0), 0);
-  const totalDespesas = despesas.reduce((s, d) => s + (parseFloat(d.valor) || 0), 0);
-  const totalInvestido = totalCompras + totalDespesas;
-  const lucro = totalVendas - totalInvestido;
-  const avesVendidas = aves.filter((a) => a.status === "Vendida").length;
-
-  function addDespesa() {
-    if (!novaDespesa.descricao.trim() || !novaDespesa.valor) return;
-    onSaveDespesa(novaDespesa);
-    setNovaDespesa(emptyDespesa());
-  }
-
-  return (
-    <div>
-      <SectionTitle>Financeiro</SectionTitle>
-
-      <div className="grid gap-3 mb-8" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-        <SummaryCard label="Gasto com compras de aves" value={money(totalCompras)} />
-        <SummaryCard label="Gasto com despesas (racao, vet...)" value={money(totalDespesas)} />
-        <SummaryCard label="Total investido" value={money(totalInvestido)} tone="bad" />
-        <SummaryCard label={`Total vendido (${avesVendidas} aves)`} value={money(totalVendas)} tone="good" />
-        <SummaryCard label={lucro >= 0 ? "Lucro" : "Prejuizo"} value={money(Math.abs(lucro))} tone={lucro >= 0 ? "good" : "bad"} />
-      </div>
-
-      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>DESPESAS DO PLANTEL (racao, veterinario, equipamentos...)</div>
-
-      <Card className="p-4 mb-6">
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
-          <Field label="Tipo">
-            <select style={inputStyle} value={novaDespesa.tipo} onChange={(e) => setNovaDespesa((d) => ({ ...d, tipo: e.target.value }))}>
-              {DESPESA_TIPOS.map((t) => <option key={t}>{t}</option>)}
-            </select>
-          </Field>
-          <Field label="Descricao">
-            <input style={inputStyle} value={novaDespesa.descricao} onChange={(e) => setNovaDespesa((d) => ({ ...d, descricao: e.target.value }))} placeholder="ex: Saco de racao 20kg" />
-          </Field>
-          <Field label="Valor (R$)">
-            <input style={inputStyle} type="number" step="0.01" value={novaDespesa.valor} onChange={(e) => setNovaDespesa((d) => ({ ...d, valor: e.target.value }))} />
-          </Field>
-          <Field label="Data">
-            <input style={inputStyle} type="date" value={novaDespesa.data} onChange={(e) => setNovaDespesa((d) => ({ ...d, data: e.target.value }))} />
-          </Field>
-        </div>
-        <button
-          onClick={addDespesa}
-          className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold mt-3"
-          style={{ background: "#C69A2E", color: "#2B1D14" }}
-        >
-          <Plus size={15} /> Adicionar despesa
-        </button>
-      </Card>
-
-      {despesas.length === 0 ? (
-        <Card className="p-6 text-center ui-sans" style={{ color: "#8a7a63" }}>Nenhuma despesa lancada ainda.</Card>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {despesas.map((d) => (
-            <Card key={d.id} className="p-3 flex items-center justify-between gap-3 ui-sans">
-              <div className="min-w-0">
-                <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{d.descricao}</div>
-                <div className="text-xs" style={{ color: "#8a7a63" }}>{d.tipo} {d.data ? `- ${d.data}` : ""} {d.synced === false ? "(nao sincronizado)" : ""}</div>
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <div className="font-semibold text-sm" style={{ color: "#a6402b" }}>{money(d.valor)}</div>
-                <button onClick={() => onDeleteDespesa(d.id)} className="p-1.5 rounded" style={{ background: "#f0dad4" }}>
-                  <Trash2 size={13} color="#a6402b" />
-                </button>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 function PlacaTab({ aves, placaId, setPlacaId, canvasRef, onDownload }) {
   return (
     <div>
@@ -1147,17 +1108,179 @@ function PlacaTab({ aves, placaId, setPlacaId, canvasRef, onDownload }) {
 }
 
 // ---------------------------------------------------------------------------
-// Autenticacao: decide entre a tela de login e o sistema em si
+// Financeiro
+// ---------------------------------------------------------------------------
+
+function SummaryCard({ label: lbl, value, tone = "default" }) {
+  const tones = {
+    default: { bg: "#FAF3E6", color: "#2B241C" },
+    bad: { bg: "#f0dad4", color: "#a6402b" },
+    good: { bg: "#e4ead9", color: "#556b3f" },
+  };
+  const t = tones[tone];
+  return (
+    <div className="rounded-xl p-4" style={{ background: t.bg, border: "1px solid #e3d3b4" }}>
+      <div className="ui-mono text-[11px] uppercase tracking-wide mb-1" style={{ color: "#8a7a63" }}>{lbl}</div>
+      <div className="text-xl font-bold" style={{ color: t.color, fontFamily: "'Fraunces', serif" }}>{value}</div>
+    </div>
+  );
+}
+
+function FinanceiroTab({ aves, despesas, onSaveDespesa, onDeleteDespesa }) {
+  const [novaDespesa, setNovaDespesa] = useState(emptyDespesa());
+  const fin = computeFinanceiro(aves, despesas);
+
+  function addDespesa() {
+    if (!novaDespesa.descricao.trim() || !novaDespesa.valor) return;
+    onSaveDespesa(novaDespesa);
+    setNovaDespesa(emptyDespesa());
+  }
+
+  return (
+    <div>
+      <SectionTitle>Financeiro</SectionTitle>
+
+      <div className="grid gap-3 mb-8" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+        <SummaryCard label="Gasto com compras de aves" value={money(fin.totalCompras)} />
+        <SummaryCard label="Gasto com despesas (racao, vet...)" value={money(fin.totalDespesas)} />
+        <SummaryCard label="Total investido" value={money(fin.totalInvestido)} tone="bad" />
+        <SummaryCard label={`Total vendido (${fin.avesVendidas} aves)`} value={money(fin.totalVendas)} tone="good" />
+        <SummaryCard label={fin.lucro >= 0 ? "Lucro" : "Prejuizo"} value={money(Math.abs(fin.lucro))} tone={fin.lucro >= 0 ? "good" : "bad"} />
+      </div>
+
+      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>DESPESAS DO PLANTEL (racao, veterinario, equipamentos...)</div>
+
+      <Card className="p-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+          <Field label="Tipo">
+            <select style={inputStyle} value={novaDespesa.tipo} onChange={(e) => setNovaDespesa((d) => ({ ...d, tipo: e.target.value }))}>{DESPESA_TIPOS.map((t) => <option key={t}>{t}</option>)}</select>
+          </Field>
+          <Field label="Descricao">
+            <input style={inputStyle} value={novaDespesa.descricao} onChange={(e) => setNovaDespesa((d) => ({ ...d, descricao: e.target.value }))} placeholder="ex: Saco de racao 20kg" />
+          </Field>
+          <Field label="Valor (R$)">
+            <input style={inputStyle} type="number" step="0.01" value={novaDespesa.valor} onChange={(e) => setNovaDespesa((d) => ({ ...d, valor: e.target.value }))} />
+          </Field>
+          <Field label="Data">
+            <input style={inputStyle} type="date" value={novaDespesa.data} onChange={(e) => setNovaDespesa((d) => ({ ...d, data: e.target.value }))} />
+          </Field>
+        </div>
+        <button onClick={addDespesa} className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold mt-3" style={{ background: "#C69A2E", color: "#2B1D14" }}>
+          <Plus size={15} /> Adicionar despesa
+        </button>
+      </Card>
+
+      {despesas.length === 0 ? (
+        <Card className="p-6 text-center ui-sans" style={{ color: "#8a7a63" }}>Nenhuma despesa lancada ainda.</Card>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {despesas.map((d) => (
+            <Card key={d.id} className="p-3 flex items-center justify-between gap-3 ui-sans">
+              <div className="min-w-0">
+                <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{d.descricao}</div>
+                <div className="text-xs" style={{ color: "#8a7a63" }}>{d.tipo} {d.data ? `- ${d.data}` : ""} {d.synced === false ? "(nao sincronizado)" : ""}</div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                <div className="font-semibold text-sm" style={{ color: "#a6402b" }}>{money(d.valor)}</div>
+                <button onClick={() => onDeleteDespesa(d.id)} className="p-1.5 rounded" style={{ background: "#f0dad4" }}><Trash2 size={13} color="#a6402b" /></button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Banco de Genetica (Fase 2)
+// ---------------------------------------------------------------------------
+
+function MutacoesTab({ mutacoes, onSave, onDelete }) {
+  const [nova, setNova] = useState(emptyMutacao());
+  const [editId, setEditId] = useState(null);
+
+  function submit() {
+    if (!nova.nome.trim()) return;
+    onSave({ ...nova, id: editId });
+    setNova(emptyMutacao());
+    setEditId(null);
+  }
+
+  function editar(m) {
+    setNova(m);
+    setEditId(m.id);
+  }
+
+  return (
+    <div>
+      <SectionTitle>Banco de Genetica</SectionTitle>
+      <p className="ui-sans text-sm mb-5" style={{ color: "#F1E6D2" }}>
+        Cadastro das mutacoes que voce trabalha. Essa base vai alimentar a calculadora genetica na proxima fase.
+      </p>
+
+      <Card className="p-4 sm:p-6 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <Field label="Nome da mutacao"><input style={inputStyle} value={nova.nome} onChange={(e) => setNova((m) => ({ ...m, nome: e.target.value }))} placeholder="ex: Pallid Azul Turquesa" /></Field>
+          <Field label="Nome alternativo"><input style={inputStyle} value={nova.nomeAlternativo} onChange={(e) => setNova((m) => ({ ...m, nomeAlternativo: e.target.value }))} placeholder="opcional" /></Field>
+          <Field label="Tipo de heranca">
+            <select style={inputStyle} value={nova.tipoHeranca} onChange={(e) => setNova((m) => ({ ...m, tipoHeranca: e.target.value }))}>{TIPOS_HERANCA.map((t) => <option key={t}>{t}</option>)}</select>
+          </Field>
+          <Field label="Combina com (outras mutacoes)"><input style={inputStyle} value={nova.combinaCom} onChange={(e) => setNova((m) => ({ ...m, combinaCom: e.target.value }))} placeholder="ex: Azul, Turquesa, Violeta (possivel)" /></Field>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <Field label="Como identificar visualmente"><input style={inputStyle} value={nova.comoIdentificar} onChange={(e) => setNova((m) => ({ ...m, comoIdentificar: e.target.value }))} placeholder="ex: penas com tom diluido, olhos claros" /></Field>
+          <Field label="Observacoes"><input style={inputStyle} value={nova.observacoes} onChange={(e) => setNova((m) => ({ ...m, observacoes: e.target.value }))} placeholder="opcional" /></Field>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={submit} className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: "#C69A2E", color: "#2B1D14" }}>
+            <Plus size={15} /> {editId ? "Salvar edicao" : "Adicionar mutacao"}
+          </button>
+          {editId && (
+            <button onClick={() => { setNova(emptyMutacao()); setEditId(null); }} className="ui-sans px-4 py-2 rounded-lg text-sm" style={{ background: "#e3d3b4", color: "#2B241C" }}>
+              Cancelar
+            </button>
+          )}
+        </div>
+      </Card>
+
+      {mutacoes.length === 0 ? (
+        <Card className="p-6 text-center ui-sans" style={{ color: "#8a7a63" }}>Nenhuma mutacao cadastrada ainda.</Card>
+      ) : (
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
+          {mutacoes.map((m) => (
+            <Card key={m.id} className="p-4 ui-sans">
+              <div className="flex items-start justify-between gap-2 mb-1">
+                <div className="font-semibold" style={{ color: "#2B241C" }}>{m.nome}</div>
+                {m.synced === false && <span className="text-[10px] font-semibold shrink-0" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</span>}
+              </div>
+              {m.nomeAlternativo && <div className="text-xs mb-1" style={{ color: "#8a7a63" }}>tambem chamada: {m.nomeAlternativo}</div>}
+              <div className="text-xs mb-1 ui-mono" style={{ color: "#a6402b" }}>{m.tipoHeranca}</div>
+              {m.combinaCom && <div className="text-xs mb-1" style={{ color: "#556b3f" }}>Combina com: {m.combinaCom}</div>}
+              {m.comoIdentificar && <div className="text-xs mb-1" style={{ color: "#7a6a52" }}>{m.comoIdentificar}</div>}
+              {m.observacoes && <div className="text-xs italic mb-2" style={{ color: "#7a6a52" }}>{m.observacoes}</div>}
+              <div className="flex gap-2 mt-2">
+                <button onClick={() => editar(m)} className="text-xs px-2 py-1 rounded" style={{ background: "#e3d3b4", color: "#2B241C" }}>Editar</button>
+                <button onClick={() => onDelete(m.id)} className="text-xs px-2 py-1 rounded flex items-center gap-1" style={{ background: "#f0dad4", color: "#a6402b" }}><Trash2 size={12} /> Remover</button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Autenticacao
 // ---------------------------------------------------------------------------
 
 export default function App() {
-  const [session, setSession] = useState(undefined); // undefined = carregando, null = deslogado
+  const [session, setSession] = useState(undefined);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => setSession(newSession));
     return () => listener.subscription.unsubscribe();
   }, []);
 
@@ -1169,9 +1292,7 @@ export default function App() {
     );
   }
 
-  if (!session) {
-    return <AuthPage />;
-  }
+  if (!session) return <AuthPage />;
 
   return <AppInner user={session.user} onLogout={() => supabase.auth.signOut()} />;
 }
