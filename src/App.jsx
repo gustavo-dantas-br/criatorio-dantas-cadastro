@@ -306,6 +306,7 @@ function AppInner({ user, onLogout }) {
   const [saving, setSaving] = useState(false);
   const [placaId, setPlacaId] = useState("");
   const [arvoreId, setArvoreId] = useState("");
+  const [statusFilter, setStatusFilter] = useState(null); // null | "A venda" | "Vendida" | "Falecida" | "casais" | "solteiros"
   const [error, setError] = useState("");
   const canvasRef = useRef(null);
 
@@ -349,6 +350,11 @@ function AppInner({ user, onLogout }) {
   function startNew() {
     setForm(emptyAve());
     setTab("form");
+  }
+
+  function goToLista(filter) {
+    setStatusFilter(filter);
+    setTab("lista");
   }
 
   function startEdit(ave) {
@@ -520,7 +526,7 @@ function AppInner({ user, onLogout }) {
     }
   }
 
-  const filtered = aves.filter((a) => {
+  const bySearch = aves.filter((a) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -529,6 +535,28 @@ function AppInner({ user, onLogout }) {
       (a.especie || "").toLowerCase().includes(q)
     );
   });
+
+  const filtered = bySearch.filter((a) => {
+    if (!statusFilter) return true;
+    if (statusFilter === "casais") return !!a.parceiroId || !!a.casalLabel?.trim();
+    if (statusFilter === "solteiros") return !a.parceiroId && !a.casalLabel?.trim();
+    return a.status === statusFilter;
+  });
+
+  // Agrupa em pares pra exibicao quando o filtro for "casais"
+  const casaisAgrupados = (() => {
+    if (statusFilter !== "casais") return [];
+    const usados = new Set();
+    const pares = [];
+    filtered.forEach((a) => {
+      if (usados.has(a.id)) return;
+      const parceiro = a.parceiroId ? aves.find((x) => x.id === a.parceiroId) : null;
+      usados.add(a.id);
+      if (parceiro) usados.add(parceiro.id);
+      pares.push({ a, b: parceiro, label: a.casalLabel || parceiro?.casalLabel || "" });
+    });
+    return pares;
+  })();
 
   const machoOptions = aves.filter((a) => a.sexo === "Macho");
   const femeaOptions = aves.filter((a) => a.sexo === "Femea");
@@ -574,7 +602,7 @@ function AppInner({ user, onLogout }) {
           ].map(({ id, label: lbl, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => (id === "form" ? startNew() : setTab(id))}
+              onClick={() => (id === "form" ? startNew() : id === "lista" ? goToLista(null) : setTab(id))}
               className="ui-sans flex items-center gap-2 md:gap-3 px-3 py-2 md:py-2.5 rounded-lg text-xs md:text-sm text-left transition-colors shrink-0"
               style={{
                 background: tab === id ? "#3a2314" : "transparent",
@@ -614,13 +642,15 @@ function AppInner({ user, onLogout }) {
           </div>
         ) : (
           <>
-            {tab === "dashboard" && <DashboardTab aves={aves} despesas={despesas} setTab={setTab} />}
+            {tab === "dashboard" && <DashboardTab aves={aves} despesas={despesas} setTab={setTab} goToLista={goToLista} />}
 
             {tab === "lista" && (
               <ListaTab
                 aves={filtered} search={search} setSearch={setSearch}
                 onEdit={startEdit} onDelete={handleDelete} onNew={startNew}
                 onSync={handleSync} onExport={handleExport} onImport={handleImport}
+                statusFilter={statusFilter} setStatusFilter={setStatusFilter}
+                casaisAgrupados={casaisAgrupados}
               />
             )}
 
@@ -713,12 +743,18 @@ function StatCard({ label: lbl, value, tone = "default", onClick }) {
   );
 }
 
-function DashboardTab({ aves, despesas, setTab }) {
+function DashboardTab({ aves, despesas, setTab, goToLista }) {
   const total = aves.length;
   const machos = aves.filter((a) => a.sexo === "Macho").length;
   const femeas = aves.filter((a) => a.sexo === "Femea").length;
   const indefinidos = aves.filter((a) => a.sexo === "Indefinido").length;
-  const casais = new Set(aves.filter((a) => a.casalLabel?.trim()).map((a) => a.casalLabel.trim())).size;
+
+  const paresPorParceiro = new Set();
+  aves.forEach((a) => { if (a.parceiroId) paresPorParceiro.add([a.id, a.parceiroId].sort().join("-")); });
+  const casaisSoLabel = aves.filter((a) => !a.parceiroId && a.casalLabel?.trim()).length;
+  const casais = paresPorParceiro.size + casaisSoLabel;
+  const solteiros = aves.filter((a) => !a.parceiroId && !a.casalLabel?.trim()).length;
+
   const disponiveis = aves.filter((a) => a.status === "A venda").length;
   const vendidas = aves.filter((a) => a.status === "Vendida").length;
   const falecidas = aves.filter((a) => a.status === "Falecida").length;
@@ -736,14 +772,15 @@ function DashboardTab({ aves, despesas, setTab }) {
       <SectionTitle>Dashboard</SectionTitle>
 
       <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
-        <StatCard label="Total de aves" value={total} onClick={() => setTab("lista")} />
+        <StatCard label="Total de aves" value={total} onClick={() => goToLista(null)} />
         <StatCard label="Machos" value={machos} />
         <StatCard label="Femeas" value={femeas} />
         <StatCard label="Sexo indefinido" value={indefinidos} />
-        <StatCard label="Casais" value={casais} />
-        <StatCard label="A venda" value={disponiveis} tone="gold" />
-        <StatCard label="Vendidas" value={vendidas} tone="good" />
-        <StatCard label="Falecidas" value={falecidas} tone="bad" />
+        <StatCard label="Casais" value={casais} onClick={() => goToLista("casais")} />
+        <StatCard label="Solteiros" value={solteiros} onClick={() => goToLista("solteiros")} />
+        <StatCard label="A venda" value={disponiveis} tone="gold" onClick={() => goToLista("A venda")} />
+        <StatCard label="Vendidas" value={vendidas} tone="good" onClick={() => goToLista("Vendida")} />
+        <StatCard label="Falecidas" value={falecidas} tone="bad" onClick={() => goToLista("Falecida")} />
       </div>
 
       <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
@@ -788,7 +825,48 @@ function DashboardTab({ aves, despesas, setTab }) {
 // Lista
 // ---------------------------------------------------------------------------
 
-function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, onExport, onImport }) {
+function AveCard({ a, onEdit, onDelete, onSync }) {
+  return (
+    <Card className="overflow-hidden flex">
+      <div className="w-24 shrink-0" style={{ background: "#3a2a1c" }}>
+        {a.foto ? <img src={a.foto} alt={a.nome} className="w-full h-full object-cover" /> : (
+          <div className="w-full h-full flex items-center justify-center"><Bird size={22} color="#8a7a63" /></div>
+        )}
+      </div>
+      <div className="flex-1 p-3 ui-sans min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="font-semibold truncate" style={{ color: "#2B241C" }}>{a.nome}</div>
+          <span className="ui-mono text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ background: a.sexado ? "#e4ead9" : "#f0e6d2", color: a.sexado ? "#556b3f" : "#8a6f2e" }}>
+            {a.sexado ? "SEXADO" : "S/ SEXAGEM"}
+          </span>
+        </div>
+        <div className="text-xs mt-0.5" style={{ color: "#7a6a52" }}>{a.especie} - {a.sexo}</div>
+        <div className="text-xs" style={{ color: "#7a6a52" }}>{a.corMutacao || "sem mutacao"}</div>
+        <div className="ui-mono text-[11px] mt-1" style={{ color: "#a6402b" }}>{a.anilha || "sem anilha"}</div>
+        <div className="flex items-center gap-2 mt-1">
+          <span className="text-[10px] px-1.5 py-0.5 rounded ui-mono" style={{ background: "#e3d3b4", color: "#5a4a30" }}>{a.status || "No plantel"}</span>
+          {a.status === "Vendida" && a.valorVenda && <span className="text-[10px] ui-mono" style={{ color: "#556b3f" }}>R$ {a.valorVenda}</span>}
+        </div>
+        {a.synced === false && <div className="text-[10px] mt-1 font-semibold" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</div>}
+        <div className="flex flex-wrap gap-2 mt-2">
+          <button onClick={() => onEdit(a)} className="text-xs px-2 py-1 rounded" style={{ background: "#e3d3b4", color: "#2B241C" }}>Editar</button>
+          <button onClick={() => onDelete(a.id)} className="text-xs px-2 py-1 rounded flex items-center gap-1" style={{ background: "#f0dad4", color: "#a6402b" }}><Trash2 size={12} /> Remover</button>
+          {a.synced === false && <button onClick={() => onSync(a)} className="text-xs px-2 py-1 rounded" style={{ background: "#e4ead9", color: "#556b3f" }}>Sincronizar</button>}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+const FILTER_LABELS = {
+  "A venda": "Aves a venda",
+  Vendida: "Aves vendidas",
+  Falecida: "Aves falecidas",
+  casais: "Casais",
+  solteiros: "Solteiros (sem parceiro)",
+};
+
+function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, onExport, onImport, statusFilter, setStatusFilter, casaisAgrupados }) {
   const pendentes = aves.filter((a) => a.synced === false).length;
   return (
     <div>
@@ -808,6 +886,13 @@ function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, on
         </div>
       </div>
 
+      {statusFilter && (
+        <div className="ui-sans mb-4 px-4 py-2 rounded-lg text-sm flex items-center justify-between gap-3" style={{ background: "#f5e9c8", color: "#8a6f2e", border: "1px solid #d6c39a" }}>
+          <span>Filtrando por: <strong>{FILTER_LABELS[statusFilter] || statusFilter}</strong> ({statusFilter === "casais" ? casaisAgrupados.length : aves.length})</span>
+          <button onClick={() => setStatusFilter(null)} className="ui-sans px-2 py-1 rounded text-xs font-semibold" style={{ background: "#2B1D14", color: "#F1E6D2" }}>Limpar filtro</button>
+        </div>
+      )}
+
       {pendentes > 0 && (
         <div className="ui-sans mb-4 px-4 py-2 rounded-lg text-sm" style={{ background: "#f0e6d2", color: "#8a6f2e", border: "1px solid #d6c39a" }}>
           {pendentes} {pendentes === 1 ? "ave salva so neste aparelho" : "aves salvas so neste aparelho"} (nao sincronizou na nuvem ainda). Use "Sincronizar" no card, ou baixe o backup pra guardar num lugar seguro.
@@ -826,40 +911,24 @@ function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, on
 
       {aves.length === 0 ? (
         <Card className="p-8 text-center ui-sans" style={{ color: "#8a7a63" }}>
-          Nenhuma ave encontrada. Cadastre a primeira pra comecar a preencher a arvore genealogica e gerar placas.
+          {statusFilter ? "Nenhuma ave nesse filtro." : "Nenhuma ave encontrada. Cadastre a primeira pra comecar a preencher a arvore genealogica e gerar placas."}
         </Card>
-      ) : (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
-          {aves.map((a) => (
-            <Card key={a.id} className="overflow-hidden flex">
-              <div className="w-24 shrink-0" style={{ background: "#3a2a1c" }}>
-                {a.foto ? <img src={a.foto} alt={a.nome} className="w-full h-full object-cover" /> : (
-                  <div className="w-full h-full flex items-center justify-center"><Bird size={22} color="#8a7a63" /></div>
-                )}
-              </div>
-              <div className="flex-1 p-3 ui-sans min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="font-semibold truncate" style={{ color: "#2B241C" }}>{a.nome}</div>
-                  <span className="ui-mono text-[10px] px-1.5 py-0.5 rounded shrink-0" style={{ background: a.sexado ? "#e4ead9" : "#f0e6d2", color: a.sexado ? "#556b3f" : "#8a6f2e" }}>
-                    {a.sexado ? "SEXADO" : "S/ SEXAGEM"}
-                  </span>
-                </div>
-                <div className="text-xs mt-0.5" style={{ color: "#7a6a52" }}>{a.especie} - {a.sexo}</div>
-                <div className="text-xs" style={{ color: "#7a6a52" }}>{a.corMutacao || "sem mutacao"}</div>
-                <div className="ui-mono text-[11px] mt-1" style={{ color: "#a6402b" }}>{a.anilha || "sem anilha"}</div>
-                <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[10px] px-1.5 py-0.5 rounded ui-mono" style={{ background: "#e3d3b4", color: "#5a4a30" }}>{a.status || "No plantel"}</span>
-                  {a.status === "Vendida" && a.valorVenda && <span className="text-[10px] ui-mono" style={{ color: "#556b3f" }}>R$ {a.valorVenda}</span>}
-                </div>
-                {a.synced === false && <div className="text-[10px] mt-1 font-semibold" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</div>}
-                <div className="flex flex-wrap gap-2 mt-2">
-                  <button onClick={() => onEdit(a)} className="text-xs px-2 py-1 rounded" style={{ background: "#e3d3b4", color: "#2B241C" }}>Editar</button>
-                  <button onClick={() => onDelete(a.id)} className="text-xs px-2 py-1 rounded flex items-center gap-1" style={{ background: "#f0dad4", color: "#a6402b" }}><Trash2 size={12} /> Remover</button>
-                  {a.synced === false && <button onClick={() => onSync(a)} className="text-xs px-2 py-1 rounded" style={{ background: "#e4ead9", color: "#556b3f" }}>Sincronizar</button>}
-                </div>
+      ) : statusFilter === "casais" ? (
+        <div className="flex flex-col gap-4">
+          {casaisAgrupados.map(({ a, b, label: casalLabel }, i) => (
+            <Card key={a.id} className="p-4">
+              {casalLabel && <div className="ui-mono text-xs mb-2" style={{ color: "#8a6f2e" }}>{casalLabel}</div>}
+              <div className="grid gap-3" style={{ gridTemplateColumns: b ? "1fr 1fr" : "1fr" }}>
+                <AveCard a={a} onEdit={onEdit} onDelete={onDelete} onSync={onSync} />
+                {b && <AveCard a={b} onEdit={onEdit} onDelete={onDelete} onSync={onSync} />}
+                {!b && <div className="ui-sans text-xs flex items-center justify-center" style={{ color: "#8a7a63" }}>Parceiro nao identificado no sistema</div>}
               </div>
             </Card>
           ))}
+        </div>
+      ) : (
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+          {aves.map((a) => <AveCard key={a.id} a={a} onEdit={onEdit} onDelete={onDelete} onSync={onSync} />)}
         </div>
       )}
     </div>
