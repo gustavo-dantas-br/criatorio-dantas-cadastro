@@ -308,7 +308,11 @@ function computeFinanceiroPeriodo(aves, despesas, inicio, fim) {
     aves.filter((a) => a.status === "Vendida" && !a.dataVenda).length +
     despesas.filter((d) => !d.data).length;
 
-  return { totalCompras, totalVendas, totalDespesas, totalInvestido, lucro, avesVendidas: vendasPeriodo.length, semData };
+  return {
+    totalCompras, totalVendas, totalDespesas, totalInvestido, lucro,
+    avesVendidas: vendasPeriodo.length, semData,
+    comprasPeriodo, vendasPeriodo, despesasPeriodo,
+  };
 }
 
 function hojeISO() {
@@ -1301,6 +1305,67 @@ function FinanceiroTab({ aves, despesas, onSaveDespesa, onDeleteDespesa }) {
           ⚠️ {finPeriodo.semData} {finPeriodo.semData === 1 ? "registro (compra/venda/despesa) esta" : "registros (compra/venda/despesa) estao"} sem data preenchida e por isso nao entram no filtro por periodo, so no saldo total.
         </div>
       )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div>
+          <div className="ui-mono text-xs mb-2" style={{ color: "#F1E6D2" }}>DESPESAS NO PERIODO ({finPeriodo.despesasPeriodo.length})</div>
+          {finPeriodo.despesasPeriodo.length === 0 ? (
+            <Card className="p-3 ui-sans text-xs" style={{ color: "#8a7a63" }}>Nenhuma despesa nesse periodo.</Card>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {finPeriodo.despesasPeriodo.map((d) => (
+                <Card key={d.id} className="p-3 ui-sans">
+                  <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{d.descricao}</div>
+                  <div className="text-xs" style={{ color: "#8a7a63" }}>{d.tipo} {d.data ? `- ${d.data}` : ""}</div>
+                  <div className="text-sm font-semibold mt-1" style={{ color: "#a6402b" }}>{money(d.valor)}</div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div className="ui-mono text-xs mb-2" style={{ color: "#F1E6D2" }}>COMPRAS NO PERIODO ({finPeriodo.comprasPeriodo.length})</div>
+          {finPeriodo.comprasPeriodo.length === 0 ? (
+            <Card className="p-3 ui-sans text-xs" style={{ color: "#8a7a63" }}>Nenhuma ave comprada nesse periodo.</Card>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {finPeriodo.comprasPeriodo.map((a) => (
+                <Card key={a.id} className="p-3 ui-sans">
+                  <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{a.nome}</div>
+                  <div className="text-xs" style={{ color: "#8a7a63" }}>
+                    {a.fornecedorNome ? `Comprada de ${a.fornecedorNome}` : "Vendedor nao informado"}
+                    {a.fornecedorTelefone ? ` - ${a.fornecedorTelefone}` : ""}
+                  </div>
+                  <div className="text-xs" style={{ color: "#8a7a63" }}>{a.dataCompra}</div>
+                  <div className="text-sm font-semibold mt-1" style={{ color: "#a6402b" }}>{money(a.valorCompra)}</div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div className="ui-mono text-xs mb-2" style={{ color: "#F1E6D2" }}>VENDAS NO PERIODO ({finPeriodo.vendasPeriodo.length})</div>
+          {finPeriodo.vendasPeriodo.length === 0 ? (
+            <Card className="p-3 ui-sans text-xs" style={{ color: "#8a7a63" }}>Nenhuma ave vendida nesse periodo.</Card>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {finPeriodo.vendasPeriodo.map((a) => (
+                <Card key={a.id} className="p-3 ui-sans">
+                  <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{a.nome}</div>
+                  <div className="text-xs" style={{ color: "#8a7a63" }}>
+                    {a.compradorNome ? `Vendida para ${a.compradorNome}` : "Comprador nao informado"}
+                    {a.compradorTelefone ? ` - ${a.compradorTelefone}` : ""}
+                  </div>
+                  <div className="text-xs" style={{ color: "#8a7a63" }}>{a.dataVenda}</div>
+                  <div className="text-sm font-semibold mt-1" style={{ color: "#556b3f" }}>{money(a.valorVenda)}</div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="my-8 h-px" style={{ background: "#4a2c18" }} />
 
