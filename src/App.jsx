@@ -287,6 +287,50 @@ function computeFinanceiro(aves, despesas) {
   return { totalCompras, totalVendas, totalDespesas, totalInvestido, lucro, avesVendidas };
 }
 
+// Filtra compras/vendas/despesas por uma data (string "YYYY-MM-DD", comparavel direto)
+// dentro de um intervalo [inicio, fim] e recalcula os totais so daquela janela.
+// Registros sem data preenchida ficam de fora do periodo (nao dava pra saber quando).
+function computeFinanceiroPeriodo(aves, despesas, inicio, fim) {
+  const dentro = (d) => (!d ? false : (!inicio || d >= inicio) && (!fim || d <= fim));
+
+  const comprasPeriodo = aves.filter((a) => a.origemTipo === "Comprada" && dentro(a.dataCompra));
+  const vendasPeriodo = aves.filter((a) => a.status === "Vendida" && dentro(a.dataVenda));
+  const despesasPeriodo = despesas.filter((d) => dentro(d.data));
+
+  const totalCompras = comprasPeriodo.reduce((s, a) => s + (parseFloat(a.valorCompra) || 0), 0);
+  const totalVendas = vendasPeriodo.reduce((s, a) => s + (parseFloat(a.valorVenda) || 0), 0);
+  const totalDespesas = despesasPeriodo.reduce((s, d) => s + (parseFloat(d.valor) || 0), 0);
+  const totalInvestido = totalCompras + totalDespesas;
+  const lucro = totalVendas - totalInvestido;
+
+  const semData =
+    aves.filter((a) => a.origemTipo === "Comprada" && !a.dataCompra).length +
+    aves.filter((a) => a.status === "Vendida" && !a.dataVenda).length +
+    despesas.filter((d) => !d.data).length;
+
+  return { totalCompras, totalVendas, totalDespesas, totalInvestido, lucro, avesVendidas: vendasPeriodo.length, semData };
+}
+
+function hojeISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+function primeiroDiaMesISO(offsetMeses = 0) {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + offsetMeses);
+  return d.toISOString().slice(0, 10);
+}
+function ultimoDiaMesISO(offsetMeses = 0) {
+  const d = new Date();
+  d.setMonth(d.getMonth() + offsetMeses + 1, 0);
+  return d.toISOString().slice(0, 10);
+}
+function primeiroDiaAnoISO() {
+  const d = new Date();
+  d.setMonth(0, 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function money(n) {
   const v = parseFloat(n);
   if (isNaN(v)) return "R$ 0,00";
@@ -1197,7 +1241,11 @@ function SummaryCard({ label: lbl, value, tone = "default" }) {
 
 function FinanceiroTab({ aves, despesas, onSaveDespesa, onDeleteDespesa }) {
   const [novaDespesa, setNovaDespesa] = useState(emptyDespesa());
-  const fin = computeFinanceiro(aves, despesas);
+  const [inicio, setInicio] = useState(primeiroDiaMesISO());
+  const [fim, setFim] = useState(hojeISO());
+
+  const finTotal = computeFinanceiro(aves, despesas);
+  const finPeriodo = computeFinanceiroPeriodo(aves, despesas, inicio, fim);
 
   function addDespesa() {
     if (!novaDespesa.descricao.trim() || !novaDespesa.valor) return;
@@ -1205,17 +1253,56 @@ function FinanceiroTab({ aves, despesas, onSaveDespesa, onDeleteDespesa }) {
     setNovaDespesa(emptyDespesa());
   }
 
+  function aplicarAtalho(tipo) {
+    if (tipo === "hoje") { setInicio(hojeISO()); setFim(hojeISO()); }
+    if (tipo === "mesAtual") { setInicio(primeiroDiaMesISO()); setFim(hojeISO()); }
+    if (tipo === "mesPassado") { setInicio(primeiroDiaMesISO(-1)); setFim(ultimoDiaMesISO(-1)); }
+    if (tipo === "anoAtual") { setInicio(primeiroDiaAnoISO()); setFim(hojeISO()); }
+    if (tipo === "tudo") { setInicio(""); setFim(""); }
+  }
+
   return (
     <div>
       <SectionTitle>Financeiro</SectionTitle>
 
+      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>SALDO TOTAL (DESDE O INICIO)</div>
       <div className="grid gap-3 mb-8" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-        <SummaryCard label="Gasto com compras de aves" value={money(fin.totalCompras)} />
-        <SummaryCard label="Gasto com despesas (racao, vet...)" value={money(fin.totalDespesas)} />
-        <SummaryCard label="Total investido" value={money(fin.totalInvestido)} tone="bad" />
-        <SummaryCard label={`Total vendido (${fin.avesVendidas} aves)`} value={money(fin.totalVendas)} tone="good" />
-        <SummaryCard label={fin.lucro >= 0 ? "Lucro" : "Prejuizo"} value={money(Math.abs(fin.lucro))} tone={fin.lucro >= 0 ? "good" : "bad"} />
+        <SummaryCard label="Gasto com compras de aves" value={money(finTotal.totalCompras)} />
+        <SummaryCard label="Gasto com despesas (racao, vet...)" value={money(finTotal.totalDespesas)} />
+        <SummaryCard label="Total investido" value={money(finTotal.totalInvestido)} tone="bad" />
+        <SummaryCard label={`Total vendido (${finTotal.avesVendidas} aves)`} value={money(finTotal.totalVendas)} tone="good" />
+        <SummaryCard label={finTotal.lucro >= 0 ? "Lucro" : "Prejuizo"} value={money(Math.abs(finTotal.lucro))} tone={finTotal.lucro >= 0 ? "good" : "bad"} />
       </div>
+
+      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>RESUMO POR PERIODO</div>
+      <Card className="p-4 mb-4">
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button onClick={() => aplicarAtalho("hoje")} className="ui-sans text-xs px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>Hoje</button>
+          <button onClick={() => aplicarAtalho("mesAtual")} className="ui-sans text-xs px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>Este mes</button>
+          <button onClick={() => aplicarAtalho("mesPassado")} className="ui-sans text-xs px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>Mes passado</button>
+          <button onClick={() => aplicarAtalho("anoAtual")} className="ui-sans text-xs px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>Este ano</button>
+          <button onClick={() => aplicarAtalho("tudo")} className="ui-sans text-xs px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>Tudo</button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-1">
+          <Field label="De"><input style={inputStyle} type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} /></Field>
+          <Field label="Ate"><input style={inputStyle} type="date" value={fim} onChange={(e) => setFim(e.target.value)} /></Field>
+        </div>
+      </Card>
+
+      <div className="grid gap-3 mb-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+        <SummaryCard label="Gasto com compras no periodo" value={money(finPeriodo.totalCompras)} />
+        <SummaryCard label="Despesas no periodo" value={money(finPeriodo.totalDespesas)} />
+        <SummaryCard label="Investido no periodo" value={money(finPeriodo.totalInvestido)} tone="bad" />
+        <SummaryCard label={`Vendido no periodo (${finPeriodo.avesVendidas} aves)`} value={money(finPeriodo.totalVendas)} tone="good" />
+        <SummaryCard label={finPeriodo.lucro >= 0 ? "Lucro no periodo" : "Prejuizo no periodo"} value={money(Math.abs(finPeriodo.lucro))} tone={finPeriodo.lucro >= 0 ? "good" : "bad"} />
+      </div>
+      {finPeriodo.semData > 0 && (
+        <div className="ui-sans text-xs mb-8" style={{ color: "#b09a78" }}>
+          ⚠️ {finPeriodo.semData} {finPeriodo.semData === 1 ? "registro (compra/venda/despesa) esta" : "registros (compra/venda/despesa) estao"} sem data preenchida e por isso nao entram no filtro por periodo, so no saldo total.
+        </div>
+      )}
+
+      <div className="my-8 h-px" style={{ background: "#4a2c18" }} />
 
       <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>DESPESAS DO PLANTEL (racao, veterinario, equipamentos...)</div>
 
