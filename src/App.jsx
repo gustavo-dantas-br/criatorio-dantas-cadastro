@@ -8,7 +8,7 @@ import { listRows, saveRow, deleteRow, uid } from "./lib/db";
 import AuthPage from "./components/AuthPage";
 
 // ---------------------------------------------------------------------------
-// Design tokens (ver <style> abaixo)
+// Design tokens
 // bg base:      #2B1D14  (walnut, header/sidebar)
 // panel:        #FAF3E6  (parchment card)
 // accent gold:  #C69A2E
@@ -20,6 +20,7 @@ import AuthPage from "./components/AuthPage";
 const ESPECIES = ["Ring Neck", "Calopsita", "Outra"];
 const SEXOS = ["Macho", "Femea", "Indefinido"];
 const STATUS_AVE = ["No plantel", "A venda", "Reservada", "Vendida", "Falecida"];
+const STATUS_PLANTEL = ["No plantel", "A venda", "Reservada"];
 const ORIGEM_TIPOS = ["Nasceu no plantel", "Comprada"];
 const DESPESA_TIPOS = ["Racao", "Veterinario/Medicamento", "Gaiola/Equipamento", "Anilha", "Outro"];
 const TIPOS_HERANCA = [
@@ -276,7 +277,7 @@ function drawPlaque(canvas, ave, photoImg) {
   ctx.fillText(footer, W - fw - 16, H - 20);
 }
 
-// ---------- Financeiro (funcao compartilhada entre Dashboard e Financeiro) ----------
+// ---------- Financeiro ----------
 function computeFinanceiro(aves, despesas) {
   const totalCompras = aves.reduce((s, a) => s + (a.origemTipo === "Comprada" ? parseFloat(a.valorCompra) || 0 : 0), 0);
   const totalVendas = aves.reduce((s, a) => s + (a.status === "Vendida" ? parseFloat(a.valorVenda) || 0 : 0), 0);
@@ -287,9 +288,6 @@ function computeFinanceiro(aves, despesas) {
   return { totalCompras, totalVendas, totalDespesas, totalInvestido, lucro, avesVendidas };
 }
 
-// Filtra compras/vendas/despesas por uma data (string "YYYY-MM-DD", comparavel direto)
-// dentro de um intervalo [inicio, fim] e recalcula os totais so daquela janela.
-// Registros sem data preenchida ficam de fora do periodo (nao dava pra saber quando).
 function computeFinanceiroPeriodo(aves, despesas, inicio, fim) {
   const dentro = (d) => (!d ? false : (!inicio || d >= inicio) && (!fim || d <= fim));
 
@@ -354,7 +352,7 @@ function AppInner({ user, onLogout }) {
   const [saving, setSaving] = useState(false);
   const [placaId, setPlacaId] = useState("");
   const [arvoreId, setArvoreId] = useState("");
-  const [statusFilter, setStatusFilter] = useState(null); // null | "A venda" | "Vendida" | "Falecida" | "casais" | "solteiros"
+  const [statusFilter, setStatusFilter] = useState(null); // null | "A venda" | "Vendida" | "Falecida" | "casais" | "solteiros" | "plantel"
   const [error, setError] = useState("");
   const canvasRef = useRef(null);
 
@@ -385,7 +383,7 @@ function AppInner({ user, onLogout }) {
       const items = await listRows("mutacoes", user.id);
       setMutacoes(items.map((m) => ({ ...m, synced: true })).sort((a, b) => (a.nome || "").localeCompare(b.nome || "")));
     } catch {
-      // silencioso - se a tabela ainda nao existir no banco, so fica vazio
+      // silencioso
     }
   }, [user.id]);
 
@@ -508,7 +506,7 @@ function AppInner({ user, onLogout }) {
     } catch (e) {
       setError(
         `Mutacao ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}). ` +
-        "Se a tabela 'mutacoes' ainda nao existe no seu Supabase, roda o novo schema_fase2.sql no SQL Editor."
+        "Se a tabela 'mutacoes' ainda nao existe no seu Supabase, roda o schema_fase2.sql no SQL Editor."
       );
     }
   }
@@ -588,10 +586,10 @@ function AppInner({ user, onLogout }) {
     if (!statusFilter) return true;
     if (statusFilter === "casais") return !!a.parceiroId || !!a.casalLabel?.trim();
     if (statusFilter === "solteiros") return !a.parceiroId && !a.casalLabel?.trim();
+    if (statusFilter === "plantel") return STATUS_PLANTEL.includes(a.status);
     return a.status === statusFilter;
   });
 
-  // Agrupa em pares pra exibicao quando o filtro for "casais"
   const casaisAgrupados = (() => {
     if (statusFilter !== "casais") return [];
     const usados = new Set();
@@ -625,7 +623,6 @@ function AppInner({ user, onLogout }) {
         ::selection { background: #C69A2E; color: #2B1D14; }
       `}</style>
 
-      {/* Sidebar / topbar */}
       <aside
         className="w-full md:w-60 shrink-0 flex flex-row md:flex-col items-center md:items-stretch py-3 md:py-6 px-3 md:px-4 gap-2 md:gap-0"
         style={{ background: "#241609", borderBottom: "1px solid #4a2c18", borderRight: "1px solid #4a2c18" }}
@@ -675,7 +672,6 @@ function AppInner({ user, onLogout }) {
         </div>
       </aside>
 
-      {/* Main */}
       <main className="flex-1 p-4 md:p-8 overflow-y-auto w-full min-w-0" style={{ minHeight: "60vh" }}>
         {error && (
           <div className="ui-sans mb-4 px-4 py-2.5 rounded-lg flex items-center justify-between" style={{ background: "#4a2018", color: "#f2c9c0", border: "1px solid #7a3226" }}>
@@ -733,7 +729,7 @@ function AppInner({ user, onLogout }) {
 }
 
 // ---------------------------------------------------------------------------
-// Componentes de UI compartilhados
+// UI compartilhada
 // ---------------------------------------------------------------------------
 
 function Card({ children, className = "" }) {
@@ -768,7 +764,7 @@ function Field({ label: lbl, children }) {
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard (Fase 2)
+// Dashboard
 // ---------------------------------------------------------------------------
 
 function StatCard({ label: lbl, value, tone = "default", onClick }) {
@@ -803,6 +799,7 @@ function DashboardTab({ aves, despesas, setTab, goToLista }) {
   const casais = paresPorParceiro.size + casaisSoLabel;
   const solteiros = aves.filter((a) => !a.parceiroId && !a.casalLabel?.trim()).length;
 
+  const plantel = aves.filter((a) => STATUS_PLANTEL.includes(a.status)).length;
   const disponiveis = aves.filter((a) => a.status === "A venda").length;
   const vendidas = aves.filter((a) => a.status === "Vendida").length;
   const falecidas = aves.filter((a) => a.status === "Falecida").length;
@@ -821,6 +818,7 @@ function DashboardTab({ aves, despesas, setTab, goToLista }) {
 
       <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
         <StatCard label="Total de aves" value={total} onClick={() => goToLista(null)} />
+        <StatCard label="Plantel" value={plantel} tone="gold" onClick={() => goToLista("plantel")} />
         <StatCard label="Machos" value={machos} />
         <StatCard label="Femeas" value={femeas} />
         <StatCard label="Sexo indefinido" value={indefinidos} />
@@ -912,6 +910,7 @@ const FILTER_LABELS = {
   Falecida: "Aves falecidas",
   casais: "Casais",
   solteiros: "Solteiros (sem parceiro)",
+  plantel: "Plantel (sob sua responsabilidade)",
 };
 
 function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, onExport, onImport, statusFilter, setStatusFilter, casaisAgrupados }) {
@@ -963,7 +962,7 @@ function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, on
         </Card>
       ) : statusFilter === "casais" ? (
         <div className="flex flex-col gap-4">
-          {casaisAgrupados.map(({ a, b, label: casalLabel }, i) => (
+          {casaisAgrupados.map(({ a, b, label: casalLabel }) => (
             <Card key={a.id} className="p-4">
               {casalLabel && <div className="ui-mono text-xs mb-2" style={{ color: "#8a6f2e" }}>{casalLabel}</div>}
               <div className="grid gap-3" style={{ gridTemplateColumns: b ? "1fr 1fr" : "1fr" }}>
@@ -1414,7 +1413,7 @@ function FinanceiroTab({ aves, despesas, onSaveDespesa, onDeleteDespesa }) {
 }
 
 // ---------------------------------------------------------------------------
-// Banco de Genetica (Fase 2)
+// Banco de Genetica
 // ---------------------------------------------------------------------------
 
 function MutacoesTab({ mutacoes, onSave, onDelete }) {
