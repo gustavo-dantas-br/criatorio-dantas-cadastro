@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Bird, Plus, Search, GitBranch, Tag, Upload, Trash2, X, Loader2, Save,
-  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna,
+  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { listRows, saveRow, deleteRow, uid } from "./lib/db";
@@ -86,6 +86,14 @@ function emptyMutacao() {
     comoIdentificar: "",
     observacoes: "",
   };
+}
+
+function emptyCliente() {
+  return { id: null, nome: "", telefone: "", endereco: "", observacoes: "", criadoEm: "" };
+}
+
+function normalizeTelefone(t) {
+  return (t || "").replace(/\D/g, "");
 }
 
 // ---------- Compressao de foto ----------
@@ -339,12 +347,26 @@ function money(n) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+// Historico do cliente e sempre CALCULADO na hora, cruzando pelo telefone com
+// as aves ja vendidas. Nao grava nada de novo nas aves, nao duplica dado.
+function historicoCliente(cliente, aves) {
+  const tel = normalizeTelefone(cliente.telefone);
+  const compras = tel
+    ? aves.filter((a) => a.status === "Vendida" && normalizeTelefone(a.compradorTelefone) === tel)
+    : [];
+  const totalAves = compras.length;
+  const totalGasto = compras.reduce((s, a) => s + (parseFloat(a.valorVenda) || 0), 0);
+  const ultimaCompra = compras.reduce((max, a) => ((a.dataVenda || "") > max ? a.dataVenda : max), "");
+  return { compras: [...compras].sort((a, b) => (b.dataVenda || "").localeCompare(a.dataVenda || "")), totalAves, totalGasto, ultimaCompra };
+}
+
 // ---------------------------------------------------------------------------
 
 function AppInner({ user, onLogout }) {
   const [aves, setAves] = useState([]);
   const [despesas, setDespesas] = useState([]);
   const [mutacoes, setMutacoes] = useState([]);
+  const [clientes, setClientes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
@@ -384,14 +406,25 @@ function AppInner({ user, onLogout }) {
       setMutacoes(items.map((m) => ({ ...m, synced: true })).sort((a, b) => (a.nome || "").localeCompare(b.nome || "")));
     } catch {
       // silencioso
-    }
-  }, [user.id]);
+      }
+    }, [user.id]);
+
+    const loadClientes = useCallback(async () => {
+      try {
+        const items = await listRows("clientes", user.id);
+        setClientes(items.map((c) => ({ ...c, synced: true })).sort((a, b) => (a.nome || "").localeCompare(b.nome || "")));
+      } catch {
+        // silencioso - se a tabela ainda nao existir no banco, so fica vazio
+      }
+    }, [user.id]);
+
 
   useEffect(() => {
     loadAves();
     loadDespesas();
     loadMutacoes();
-  }, [loadAves, loadDespesas, loadMutacoes]);
+    loadClientes();
+  }, [loadAves, loadDespesas, loadMutacoes, loadClientes]);
 
   function startNew() {
     setForm(emptyAve());
@@ -520,6 +553,39 @@ function AppInner({ user, onLogout }) {
     }
   }
 
+  function handleSaveCliente(cliente) {
+    if (!cliente.nome.trim()) return { ok: false, error: "Da um nome pro cliente." };
+    const telNorm = normalizeTelefone(cliente.telefone);
+    if (telNorm) {
+      const duplicado = clientes.find((c) => c.id !== cliente.id && normalizeTelefone(c.telefone) === telNorm);
+      if (duplicado) {
+        return { ok: false, error: `Ja existe um cliente com esse telefone: ${duplicado.nome}. Edita ele em vez de criar outro.` };
+      }
+    }
+    const id = cliente.id || uid();
+    const toSave = { ...cliente, id, criadoEm: cliente.criadoEm || new Date().toISOString() };
+    setClientes((prev) => {
+      const others = prev.filter((c) => c.id !== id);
+      return [...others, { ...toSave, synced: false }].sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    });
+    saveRow("clientes", user.id, toSave)
+      .then(() => setClientes((prev) => prev.map((c) => (c.id === id ? { ...c, synced: true } : c))))
+      .catch((e) => setError(
+        `"${cliente.nome}" ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}). ` +
+        "Se a tabela 'clientes' ainda nao existe no seu Supabase, roda o schema_fase_clientes.sql no SQL Editor."
+      ));
+    return { ok: true };
+  }
+
+  async function handleDeleteCliente(id) {
+    setClientes((prev) => prev.filter((c) => c.id !== id));
+    try {
+      await deleteRow("clientes", id);
+    } catch {
+      // ja removido localmente
+    }
+  }
+
   useEffect(() => {
     if (tab !== "placa" || !placaId) return;
     const ave = aves.find((a) => a.id === placaId);
@@ -643,6 +709,7 @@ function AppInner({ user, onLogout }) {
             { id: "arvore", label: "Arvore", icon: GitBranch },
             { id: "placa", label: "Placa", icon: Tag },
             { id: "financeiro", label: "Financeiro", icon: DollarSign },
+            { id: "clientes", label: "Clientes", icon: Users },
             { id: "mutacoes", label: "Genetica", icon: Dna },
           ].map(({ id, label: lbl, icon: Icon }) => (
             <button
@@ -720,6 +787,10 @@ function AppInner({ user, onLogout }) {
 
             {tab === "mutacoes" && (
               <MutacoesTab mutacoes={mutacoes} onSave={handleSaveMutacao} onDelete={handleDeleteMutacao} />
+            )}
+
+            {tab === "clientes" && (
+              <ClientesTab clientes={clientes} aves={aves} onSave={handleSaveCliente} onDelete={handleDeleteCliente} />
             )}
           </>
         )}
@@ -1484,6 +1555,194 @@ function MutacoesTab({ mutacoes, onSave, onDelete }) {
                 <button onClick={() => onDelete(m.id)} className="text-xs px-2 py-1 rounded flex items-center gap-1" style={{ background: "#f0dad4", color: "#a6402b" }}><Trash2 size={12} /> Remover</button>
               </div>
             </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Clientes (Fase 1)
+// ---------------------------------------------------------------------------
+
+function ClienteCard({ c, historico, onOpen }) {
+  return (
+    <Card className="p-4 ui-sans cursor-pointer" onClick={() => onOpen(c.id)}>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="font-semibold" style={{ color: "#2B241C" }}>{c.nome}</div>
+        {c.synced === false && <span className="text-[10px] font-semibold shrink-0" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</span>}
+      </div>
+      {c.telefone && (
+        <div className="text-xs flex items-center gap-1 mb-1" style={{ color: "#8a7a63" }}>
+          <Phone size={11} /> {c.telefone}
+        </div>
+      )}
+      <div className="flex gap-3 mt-2">
+        <span className="text-xs ui-mono" style={{ color: "#556b3f" }}>{historico.totalAves} {historico.totalAves === 1 ? "compra" : "compras"}</span>
+        <span className="text-xs ui-mono" style={{ color: "#a6402b" }}>{money(historico.totalGasto)}</span>
+      </div>
+    </Card>
+  );
+}
+
+function ClienteForm({ inicial, onSave, onCancel, error }) {
+  const [c, setC] = useState(inicial);
+  const set = (k) => (e) => setC((f) => ({ ...f, [k]: e.target.value }));
+  return (
+    <Card className="p-4 sm:p-6 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <Field label="Nome"><input style={inputStyle} value={c.nome} onChange={set("nome")} placeholder="ex: Joao da Silva" /></Field>
+        <Field label="Telefone"><input style={inputStyle} value={c.telefone} onChange={set("telefone")} placeholder="ex: (11) 99999-9999" /></Field>
+      </div>
+      <div className="grid grid-cols-1 gap-4 mb-4">
+        <Field label="Endereco"><input style={inputStyle} value={c.endereco} onChange={set("endereco")} placeholder="opcional" /></Field>
+        <Field label="Observacoes"><input style={inputStyle} value={c.observacoes} onChange={set("observacoes")} placeholder="opcional" /></Field>
+      </div>
+      {error && <div className="ui-sans text-sm mb-4 px-3 py-2 rounded-lg" style={{ background: "#f0dad4", color: "#a6402b" }}>{error}</div>}
+      <div className="flex gap-3">
+        <button onClick={() => onSave(c)} className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: "#C69A2E", color: "#2B1D14" }}>
+          <Save size={15} /> Salvar
+        </button>
+        <button onClick={onCancel} className="ui-sans px-4 py-2 rounded-lg text-sm" style={{ background: "#e3d3b4", color: "#2B241C" }}>Cancelar</button>
+      </div>
+    </Card>
+  );
+}
+
+function ClienteDetalhe({ cliente, historico, onBack, onEdit, onDelete }) {
+  return (
+    <div>
+      <button onClick={onBack} className="ui-sans text-xs mb-4 px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>← Voltar pra lista</button>
+      <Card className="p-6 mb-6">
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <div className="text-xl font-bold ui-sans" style={{ color: "#2B241C" }}>{cliente.nome}</div>
+            {cliente.telefone && <div className="text-sm flex items-center gap-1 mt-1" style={{ color: "#8a7a63" }}><Phone size={13} /> {cliente.telefone}</div>}
+            {cliente.endereco && <div className="text-sm mt-1 ui-sans" style={{ color: "#8a7a63" }}>{cliente.endereco}</div>}
+            {cliente.observacoes && <div className="text-sm mt-1 italic ui-sans" style={{ color: "#8a7a63" }}>{cliente.observacoes}</div>}
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={() => onEdit(cliente)} className="text-xs px-2 py-1 rounded ui-sans" style={{ background: "#e3d3b4", color: "#2B241C" }}>Editar</button>
+            <button onClick={() => onDelete(cliente.id)} className="text-xs px-2 py-1 rounded flex items-center gap-1 ui-sans" style={{ background: "#f0dad4", color: "#a6402b" }}><Trash2 size={12} /> Remover</button>
+          </div>
+        </div>
+
+        <div className="grid gap-3 mb-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+          <SummaryCard label="Total de aves compradas" value={historico.totalAves} />
+          <SummaryCard label="Total gasto" value={money(historico.totalGasto)} tone="good" />
+          <SummaryCard label="Ultima compra" value={historico.ultimaCompra || "-"} />
+        </div>
+      </Card>
+
+      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>HISTORICO DE COMPRAS</div>
+      {historico.compras.length === 0 ? (
+        <Card className="p-6 text-center ui-sans" style={{ color: "#8a7a63" }}>
+          Nenhuma compra encontrada com esse telefone ainda. Se esse cliente ja comprou uma ave, confere se o telefone bate com o que foi preenchido na venda.
+        </Card>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {historico.compras.map((a) => (
+            <Card key={a.id} className="p-3 flex items-center gap-3 ui-sans">
+              <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
+                {a.foto ? <img src={a.foto} className="w-full h-full object-cover" alt="" /> : null}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{a.nome} <span className="font-normal" style={{ color: "#8a7a63" }}>({a.especie})</span></div>
+                <div className="text-xs" style={{ color: "#8a7a63" }}>{a.dataVenda || "sem data"}</div>
+              </div>
+              <div className="text-sm font-semibold" style={{ color: "#556b3f" }}>{money(a.valorVenda)}</div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ClientesTab({ clientes, aves, onSave, onDelete }) {
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [detalheId, setDetalheId] = useState(null);
+  const [formError, setFormError] = useState("");
+
+  const filtrados = clientes.filter((c) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (c.nome || "").toLowerCase().includes(q) || (c.telefone || "").includes(q);
+  });
+
+  function salvar(cliente) {
+    const result = onSave(cliente);
+    if (result?.ok) {
+      setShowForm(false);
+      setEditando(null);
+      setFormError("");
+    } else {
+      setFormError(result?.error || "Nao consegui salvar.");
+    }
+  }
+
+  const clienteDetalhe = detalheId ? clientes.find((c) => c.id === detalheId) : null;
+  if (clienteDetalhe) {
+    const historico = historicoCliente(clienteDetalhe, aves);
+    return (
+      <div>
+        <SectionTitle>Clientes</SectionTitle>
+        <ClienteDetalhe
+          cliente={clienteDetalhe}
+          historico={historico}
+          onBack={() => setDetalheId(null)}
+          onEdit={(c) => { setDetalheId(null); setEditando(c); setShowForm(true); setFormError(""); }}
+          onDelete={(id) => { onDelete(id); setDetalheId(null); }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <SectionTitle>Clientes</SectionTitle>
+        {!showForm && (
+          <button
+            onClick={() => { setEditando(emptyCliente()); setShowForm(true); setFormError(""); }}
+            className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
+            style={{ background: "#C69A2E", color: "#2B1D14" }}
+          >
+            <Plus size={16} /> Novo cliente
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <ClienteForm
+          inicial={editando || emptyCliente()}
+          onSave={salvar}
+          onCancel={() => { setShowForm(false); setEditando(null); setFormError(""); }}
+          error={formError}
+        />
+      )}
+
+      <div className="relative mb-6 max-w-sm">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#8a7a63" }} />
+        <input
+          value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por nome ou telefone..."
+          className="ui-sans w-full pl-9 pr-3 py-2 rounded-lg text-sm outline-none"
+          style={{ background: "#FAF3E6", border: "1px solid #e3d3b4", color: "#2B241C" }}
+        />
+      </div>
+
+      {filtrados.length === 0 ? (
+        <Card className="p-8 text-center ui-sans" style={{ color: "#8a7a63" }}>
+          Nenhum cliente cadastrado ainda. Cadastre pelo nome/telefone de quem ja comprou (ou vai comprar) uma ave.
+        </Card>
+      ) : (
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+          {filtrados.map((c) => (
+            <ClienteCard key={c.id} c={c} historico={historicoCliente(c, aves)} onOpen={setDetalheId} />
           ))}
         </div>
       )}
