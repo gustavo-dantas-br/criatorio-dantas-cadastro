@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Bird, Plus, Search, GitBranch, Tag, Upload, Trash2, X, Loader2, Save,
-  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone,
+  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { listRows, saveRow, deleteRow, uid } from "./lib/db";
@@ -812,7 +812,7 @@ function AppInner({ user, onLogout }) {
               <FormTab
                 form={form} setForm={setForm} onSave={handleSave} onPhoto={handlePhoto} saving={saving}
                 machoOptions={machoOptions} femeaOptions={femeaOptions} parceiroOptions={parceiroOptions}
-                mutacoes={mutacoes} onCancel={() => setTab("lista")}
+                mutacoes={mutacoes} clientes={clientes} onCancel={() => setTab("lista")}
               />
             )}
 
@@ -1102,7 +1102,83 @@ function ListaTab({ aves, search, setSearch, onEdit, onDelete, onNew, onSync, on
 // Formulario de ave
 // ---------------------------------------------------------------------------
 
-function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOptions, parceiroOptions, mutacoes, onCancel }) {
+function SeletorComprador({ form, setForm, clientes }) {
+  const [modo, setModo] = useState("existente"); // "existente" | "novo"
+  const [busca, setBusca] = useState("");
+
+  const resultados = busca.trim()
+    ? clientes.filter((c) => {
+        const q = busca.trim().toLowerCase();
+        return (c.nome || "").toLowerCase().includes(q) || (c.telefone || "").includes(q);
+      })
+    : clientes;
+
+  function selecionar(c) {
+    setForm((f) => ({ ...f, compradorNome: c.nome, compradorTelefone: c.telefone, compradorEndereco: c.endereco }));
+    setBusca(`${c.nome}${c.telefone ? " - " + c.telefone : ""}`);
+  }
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-3">
+        <button
+          type="button"
+          onClick={() => setModo("existente")}
+          className="ui-sans text-xs px-3 py-1.5 rounded-lg font-semibold"
+          style={{ background: modo === "existente" ? "#556b3f" : "#e3d3b4", color: modo === "existente" ? "#F1E6D2" : "#2B241C" }}
+        >
+          🔎 Selecionar cliente existente
+        </button>
+        <button
+          type="button"
+          onClick={() => setModo("novo")}
+          className="ui-sans text-xs px-3 py-1.5 rounded-lg font-semibold"
+          style={{ background: modo === "novo" ? "#556b3f" : "#e3d3b4", color: modo === "novo" ? "#F1E6D2" : "#2B241C" }}
+        >
+          + Novo cliente
+        </button>
+      </div>
+
+      {modo === "existente" && (
+        <div className="mb-2">
+          {clientes.length === 0 ? (
+            <div className="ui-sans text-xs" style={{ color: "#8a7a63" }}>
+              Voce ainda nao tem clientes cadastrados. Cadastre em "Clientes", ou usa "+ Novo cliente" aqui do lado.
+            </div>
+          ) : (
+            <>
+              <input
+                style={inputStyle}
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar cliente por nome ou telefone..."
+                className="w-full mb-2"
+              />
+              {busca.trim() && resultados.length > 0 && (
+                <div className="flex flex-col gap-1.5 mb-2">
+                  {resultados.slice(0, 6).map((c) => (
+                      <button
+                        type="button"
+                        key={c.id}
+                        onClick={() => selecionar(c)}
+                        className="ui-sans text-left text-sm px-3 py-2 rounded-lg flex items-center justify-between gap-2"
+                        style={{ background: "#FAF3E6", border: "1px solid #e3d3b4", color: "#2B241C" }}
+                      >
+                        <span>{c.nome}</span>
+                        {c.telefone && <span className="ui-mono text-xs" style={{ color: "#8a7a63" }}>{c.telefone}</span>}
+                      </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOptions, parceiroOptions, mutacoes, clientes, onCancel }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target?.type === "checkbox" ? e.target.checked : e.target.value }));
 
   return (
@@ -1197,12 +1273,15 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
         <div className="ui-mono text-xs mb-3" style={{ color: "#8a7a63" }}>VENDA</div>
 
         {form.status === "Vendida" ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Nome do comprador"><input style={inputStyle} value={form.compradorNome} onChange={set("compradorNome")} /></Field>
-            <Field label="Telefone do comprador"><input style={inputStyle} value={form.compradorTelefone} onChange={set("compradorTelefone")} /></Field>
-            <Field label="Endereco do comprador"><input style={inputStyle} value={form.compradorEndereco} onChange={set("compradorEndereco")} /></Field>
-            <Field label="Valor vendido (R$)"><input style={inputStyle} type="number" step="0.01" value={form.valorVenda} onChange={set("valorVenda")} /></Field>
-            <Field label="Data da venda"><input style={inputStyle} type="date" value={form.dataVenda} onChange={set("dataVenda")} /></Field>
+          <div>
+            <SeletorComprador form={form} setForm={setForm} clientes={clientes} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+              <Field label="Nome do comprador"><input style={inputStyle} value={form.compradorNome} onChange={set("compradorNome")} /></Field>
+              <Field label="Telefone do comprador"><input style={inputStyle} value={form.compradorTelefone} onChange={set("compradorTelefone")} /></Field>
+              <Field label="Endereco do comprador"><input style={inputStyle} value={form.compradorEndereco} onChange={set("compradorEndereco")} /></Field>
+              <Field label="Valor vendido (R$)"><input style={inputStyle} type="number" step="0.01" value={form.valorVenda} onChange={set("valorVenda")} /></Field>
+              <Field label="Data da venda"><input style={inputStyle} type="date" value={form.dataVenda} onChange={set("dataVenda")} /></Field>
+            </div>
           </div>
         ) : (
           <div className="text-xs ui-sans" style={{ color: "#8a7a63" }}>Muda o status pra "Vendida" acima pra preencher os dados do comprador.</div>
@@ -1611,21 +1690,31 @@ function MutacoesTab({ mutacoes, onSave, onDelete }) {
 // Clientes (Fase 1)
 // ---------------------------------------------------------------------------
 
-function ClienteCard({ c, historico, onOpen }) {
+function ClienteCard({ c, historico, onOpen, onEdit }) {
   return (
-    <Card className="p-4 ui-sans cursor-pointer" onClick={() => onOpen(c.id)}>
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <div className="font-semibold" style={{ color: "#2B241C" }}>{c.nome}</div>
-        {c.synced === false && <span className="text-[10px] font-semibold shrink-0" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</span>}
-      </div>
-      {c.telefone && (
-        <div className="text-xs flex items-center gap-1 mb-1" style={{ color: "#8a7a63" }}>
-          <Phone size={11} /> {c.telefone}
+    <Card className="p-4 ui-sans">
+      <div className="cursor-pointer" onClick={() => onOpen(c.id)}>
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <div className="font-semibold" style={{ color: "#2B241C" }}>{c.nome}</div>
+          {c.synced === false && <span className="text-[10px] font-semibold shrink-0" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</span>}
         </div>
-      )}
-      <div className="flex gap-3 mt-2">
-        <span className="text-xs ui-mono" style={{ color: "#556b3f" }}>{historico.totalAves} {historico.totalAves === 1 ? "compra" : "compras"}</span>
-        <span className="text-xs ui-mono" style={{ color: "#a6402b" }}>{money(historico.totalGasto)}</span>
+        {c.telefone && (
+          <div className="text-xs flex items-center gap-1 mb-1" style={{ color: "#8a7a63" }}>
+            <Phone size={11} /> {c.telefone}
+          </div>
+        )}
+        <div className="flex gap-3 mt-2">
+          <span className="text-xs ui-mono" style={{ color: "#556b3f" }}>{historico.totalAves} {historico.totalAves === 1 ? "compra" : "compras"}</span>
+          <span className="text-xs ui-mono" style={{ color: "#a6402b" }}>{money(historico.totalGasto)}</span>
+        </div>
+      </div>
+      <div className="flex gap-2 mt-3">
+        <button onClick={() => onEdit(c)} className="text-xs px-2 py-1 rounded flex items-center gap-1" style={{ background: "#e3d3b4", color: "#2B241C" }}>
+          <Pencil size={12} /> Editar
+        </button>
+        <button onClick={() => onOpen(c.id)} className="text-xs px-2 py-1 rounded" style={{ background: "#f0e6d2", color: "#8a6f2e" }}>
+          Ver historico
+        </button>
       </div>
     </Card>
   );
@@ -1741,7 +1830,7 @@ function ClientesTab({ clientes, aves, onSave, onDelete, onImportar }) {
           cliente={clienteDetalhe}
           historico={historico}
           onBack={() => setDetalheId(null)}
-          onEdit={(c) => { setDetalheId(null); setEditando(c); setShowForm(true); setFormError(""); }}
+          onEdit={(c) => { setDetalheId(null); setEditando(c); setShowForm(true); setFormError(""); window.scrollTo({ top: 0, behavior: "smooth" }); }}
           onDelete={(id) => { onDelete(id); setDetalheId(null); }}
         />
       </div>
@@ -1811,7 +1900,13 @@ function ClientesTab({ clientes, aves, onSave, onDelete, onImportar }) {
       ) : (
         <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
           {filtrados.map((c) => (
-            <ClienteCard key={c.id} c={c} historico={historicoCliente(c, aves)} onOpen={setDetalheId} />
+            <ClienteCard
+              key={c.id}
+              c={c}
+              historico={historicoCliente(c, aves)}
+              onOpen={setDetalheId}
+              onEdit={(cli) => { setEditando(cli); setShowForm(true); setFormError(""); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+            />
           ))}
         </div>
       )}
