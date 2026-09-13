@@ -351,9 +351,16 @@ function money(n) {
 // as aves ja vendidas. Nao grava nada de novo nas aves, nao duplica dado.
 function historicoCliente(cliente, aves) {
   const tel = normalizeTelefone(cliente.telefone);
-  const compras = tel
-    ? aves.filter((a) => a.status === "Vendida" && normalizeTelefone(a.compradorTelefone) === tel)
-    : [];
+  const nome = (cliente.nome || "").trim().toLowerCase();
+  // Se o cliente tem telefone, casa por telefone (mais confiavel).
+  // Se NAO tem telefone (comum em cliente importado de uma venda antiga sem
+  // telefone preenchido), cai pra comparar pelo nome exato como alternativa.
+  const compras = aves.filter((a) => {
+    if (a.status !== "Vendida") return false;
+    if (tel) return normalizeTelefone(a.compradorTelefone) === tel;
+    if (nome) return (a.compradorNome || "").trim().toLowerCase() === nome;
+    return false;
+  });
   const totalAves = compras.length;
   const totalGasto = compras.reduce((s, a) => s + (parseFloat(a.valorVenda) || 0), 0);
   const ultimaCompra = compras.reduce((max, a) => ((a.dataVenda || "") > max ? a.dataVenda : max), "");
