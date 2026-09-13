@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Bird, Plus, Search, GitBranch, Tag, Upload, Trash2, X, Loader2, Save,
-  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil,
+  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil, ClipboardCheck, Truck,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { listRows, saveRow, deleteRow, uid } from "./lib/db";
@@ -21,6 +21,8 @@ const ESPECIES = ["Ring Neck", "Calopsita", "Outra"];
 const SEXOS = ["Macho", "Femea", "Indefinido"];
 const STATUS_AVE = ["No plantel", "A venda", "Reservada", "Vendida", "Falecida"];
 const STATUS_PLANTEL = ["No plantel", "A venda", "Reservada"];
+const STATUS_POSVENDA = ["Venda realizada", "Entregue", "Primeiro contato", "Acompanhamento", "Cliente satisfeito"];
+const SATISFACAO_OPCOES = ["Pendente", "Sim", "Nao"];
 const ORIGEM_TIPOS = ["Nasceu no plantel", "Comprada"];
 const DESPESA_TIPOS = ["Racao", "Veterinario/Medicamento", "Gaiola/Equipamento", "Anilha", "Outro"];
 const TIPOS_HERANCA = [
@@ -61,6 +63,7 @@ function emptyAve() {
     fornecedorNome: "",
     fornecedorTelefone: "",
     fornecedorEndereco: "",
+    fornecedorId: "",
     valorCompra: "",
     dataCompra: "",
     compradorNome: "",
@@ -69,6 +72,11 @@ function emptyAve() {
     valorVenda: "",
     dataVenda: "",
     clienteId: "",
+    dataEntrega: "",
+    statusPosVenda: "Venda realizada",
+    dataUltimoContato: "",
+    obsPosVenda: "",
+    clienteSatisfeito: "Pendente",
     criadoEm: "",
   };
 }
@@ -90,6 +98,10 @@ function emptyMutacao() {
 }
 
 function emptyCliente() {
+  return { id: null, nome: "", telefone: "", endereco: "", observacoes: "", criadoEm: "" };
+}
+
+function emptyFornecedor() {
   return { id: null, nome: "", telefone: "", endereco: "", observacoes: "", criadoEm: "" };
 }
 
@@ -399,6 +411,54 @@ function clientesCandidatosDeVendas(aves, clientes) {
   });
   return Array.from(vistos.values());
 }
+
+// Historico do fornecedor: espelha historicoCliente, so que olhando pro lado
+// da COMPRA (origemTipo === "Comprada") em vez da venda.
+function historicoFornecedor(fornecedor, aves) {
+  const porId = aves.filter((a) => a.origemTipo === "Comprada" && a.fornecedorId === fornecedor.id);
+  let compras = porId;
+
+  if (compras.length === 0) {
+    const tel = normalizeTelefone(fornecedor.telefone);
+    const nome = (fornecedor.nome || "").trim().toLowerCase();
+    compras = aves.filter((a) => {
+      if (a.origemTipo !== "Comprada" || a.fornecedorId) return false;
+      if (tel) return normalizeTelefone(a.fornecedorTelefone) === tel;
+      if (nome) return (a.fornecedorNome || "").trim().toLowerCase() === nome;
+      return false;
+    });
+  }
+
+  const totalAves = compras.length;
+  const totalGasto = compras.reduce((s, a) => s + (parseFloat(a.valorCompra) || 0), 0);
+  const ultimaCompra = compras.reduce((max, a) => ((a.dataCompra || "") > max ? a.dataCompra : max), "");
+  return { compras: [...compras].sort((a, b) => (b.dataCompra || "").localeCompare(a.dataCompra || "")), totalAves, totalGasto, ultimaCompra };
+}
+
+function fornecedoresCandidatosDeCompras(aves, fornecedores) {
+  const telsExistentes = new Set(fornecedores.map((f) => normalizeTelefone(f.telefone)).filter(Boolean));
+  const nomesExistentes = new Set(fornecedores.map((f) => (f.nome || "").trim().toLowerCase()).filter(Boolean));
+
+  const vistos = new Map();
+  aves.forEach((a) => {
+    if (a.origemTipo !== "Comprada") return;
+    const nome = (a.fornecedorNome || "").trim();
+    const tel = normalizeTelefone(a.fornecedorTelefone);
+    if (!nome && !tel) return;
+    const chave = tel || nome.toLowerCase();
+    if (tel && telsExistentes.has(tel)) return;
+    if (!tel && nomesExistentes.has(nome.toLowerCase())) return;
+    if (!vistos.has(chave)) {
+      vistos.set(chave, {
+        nome: nome || "(sem nome)",
+        telefone: a.fornecedorTelefone || "",
+        endereco: a.fornecedorEndereco || "",
+        observacoes: "Importado automaticamente de uma compra ja cadastrada.",
+      });
+    }
+  });
+  return Array.from(vistos.values());
+}
 // ---------------------------------------------------------------------------
 
 function AppInner({ user, onLogout }) {
@@ -406,6 +466,7 @@ function AppInner({ user, onLogout }) {
   const [despesas, setDespesas] = useState([]);
   const [mutacoes, setMutacoes] = useState([]);
   const [clientes, setClientes] = useState([]);
+  const [fornecedores, setFornecedores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
@@ -459,12 +520,22 @@ function AppInner({ user, onLogout }) {
     }
   }, [user.id]);
 
+  const loadFornecedores = useCallback(async () => {
+    try {
+      const items = await listRows("fornecedores", user.id);
+      setFornecedores(items.map((f) => ({ ...f, synced: true })).sort((a, b) => (a.nome || "").localeCompare(b.nome || "")));
+    } catch {
+      // silencioso - se a tabela ainda nao existir no banco, so fica vazio
+    }
+  }, [user.id]);
+
   useEffect(() => {
     loadAves();
     loadDespesas();
     loadMutacoes();
     loadClientes();
-  }, [loadAves, loadDespesas, loadMutacoes, loadClientes]);
+    loadFornecedores();
+  }, [loadAves, loadDespesas, loadMutacoes, loadClientes, loadFornecedores]);
 
   function startNew() {
     setForm(emptyAve());
@@ -517,6 +588,30 @@ function AppInner({ user, onLogout }) {
       }
     }
 
+    // Vincula (ou cria) automaticamente o Fornecedor quando a ave foi comprada.
+    if (toSave.origemTipo === "Comprada" && !toSave.fornecedorId && (toSave.fornecedorNome?.trim() || toSave.fornecedorTelefone?.trim())) {
+      const tel = normalizeTelefone(toSave.fornecedorTelefone);
+      const nomeBusca = (toSave.fornecedorNome || "").trim().toLowerCase();
+      let existente = null;
+      if (tel) existente = fornecedores.find((f) => normalizeTelefone(f.telefone) === tel);
+      if (!existente && nomeBusca) existente = fornecedores.find((f) => (f.nome || "").trim().toLowerCase() === nomeBusca);
+
+      if (existente) {
+        toSave.fornecedorId = existente.id;
+      } else {
+        const novoFornecedor = {
+          ...emptyFornecedor(),
+          id: uid(),
+          nome: toSave.fornecedorNome?.trim() || "(sem nome)",
+          telefone: toSave.fornecedorTelefone || "",
+          endereco: toSave.fornecedorEndereco || "",
+          observacoes: "Fornecedor criado automaticamente ao registrar essa compra.",
+        };
+        handleSaveFornecedor(novoFornecedor);
+        toSave.fornecedorId = novoFornecedor.id;
+      }
+    }
+
     setAves((prev) => {
       const others = prev.filter((a) => a.id !== id);
       return [...others, { ...toSave, synced: false }].sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
@@ -543,6 +638,21 @@ function AppInner({ user, onLogout }) {
       setError("");
     } catch (e) {
       setError(`Ainda nao consegui sincronizar "${ave.nome}" (${e?.message || "erro desconhecido"}).`);
+    }
+  }
+
+  // Atualiza so os campos de pos-venda de uma ave ja vendida, sem passar
+  // pelo formulario inteiro de cadastro.
+  async function handleUpdatePosVenda(aveId, patch) {
+    const atualizada = aves.find((a) => a.id === aveId);
+    if (!atualizada) return;
+    const toSave = { ...atualizada, ...patch };
+    setAves((prev) => prev.map((a) => (a.id === aveId ? { ...toSave, synced: false } : a)));
+    try {
+      await saveRow("aves", user.id, toSave);
+      setAves((prev) => prev.map((a) => (a.id === aveId ? { ...a, synced: true } : a)));
+    } catch (e) {
+      setError(`Pos-venda de "${atualizada.nome}" ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}).`);
     }
   }
 
@@ -664,6 +774,54 @@ function AppInner({ user, onLogout }) {
       saveRow("clientes", user.id, c)
         .then(() => setClientes((prev) => prev.map((x) => (x.id === c.id ? { ...x, synced: true } : x))))
         .catch(() => setError(`"${c.nome}" foi importado na tela, mas nao sincronizou ainda. Use o botao de sincronizar depois.`));
+    });
+  }
+
+  function handleSaveFornecedor(fornecedor) {
+    if (!fornecedor.nome.trim()) return { ok: false, error: "Da um nome pro fornecedor." };
+    const telNorm = normalizeTelefone(fornecedor.telefone);
+    if (telNorm) {
+      const duplicado = fornecedores.find((f) => f.id !== fornecedor.id && normalizeTelefone(f.telefone) === telNorm);
+      if (duplicado) {
+        return { ok: false, error: `Ja existe um fornecedor com esse telefone: ${duplicado.nome}. Edita ele em vez de criar outro.` };
+      }
+    }
+    const id = fornecedor.id || uid();
+    const toSave = { ...fornecedor, id, criadoEm: fornecedor.criadoEm || new Date().toISOString() };
+    setFornecedores((prev) => {
+      const others = prev.filter((f) => f.id !== id);
+      return [...others, { ...toSave, synced: false }].sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    });
+    saveRow("fornecedores", user.id, toSave)
+      .then(() => setFornecedores((prev) => prev.map((f) => (f.id === id ? { ...f, synced: true } : f))))
+      .catch((e) => setError(
+        `"${fornecedor.nome}" ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}). ` +
+        "Se a tabela 'fornecedores' ainda nao existe no seu Supabase, roda o schema_fase_fornecedores.sql no SQL Editor."
+      ));
+    return { ok: true };
+  }
+
+  async function handleDeleteFornecedor(id) {
+    setFornecedores((prev) => prev.filter((f) => f.id !== id));
+    try {
+      await deleteRow("fornecedores", id);
+    } catch {
+      // ja removido localmente
+    }
+  }
+
+  function handleImportarFornecedores(candidatos) {
+    const novos = candidatos.map((f) => ({
+      ...emptyFornecedor(),
+      ...f,
+      id: uid(),
+      criadoEm: new Date().toISOString(),
+    }));
+    setFornecedores((prev) => [...prev, ...novos.map((f) => ({ ...f, synced: false }))].sort((a, b) => (a.nome || "").localeCompare(b.nome || "")));
+    novos.forEach((f) => {
+      saveRow("fornecedores", user.id, f)
+        .then(() => setFornecedores((prev) => prev.map((x) => (x.id === f.id ? { ...x, synced: true } : x))))
+        .catch(() => setError(`"${f.nome}" foi importado na tela, mas nao sincronizou ainda. Use o botao de sincronizar depois.`));
     });
   }
 
@@ -791,6 +949,8 @@ function AppInner({ user, onLogout }) {
             { id: "placa", label: "Placa", icon: Tag },
             { id: "financeiro", label: "Financeiro", icon: DollarSign },
             { id: "clientes", label: "Clientes", icon: Users },
+            { id: "fornecedores", label: "Fornecedores", icon: Truck },
+            { id: "posvenda", label: "Pos-venda", icon: ClipboardCheck },
             { id: "mutacoes", label: "Genetica", icon: Dna },
           ].map(({ id, label: lbl, icon: Icon }) => (
             <button
@@ -850,7 +1010,7 @@ function AppInner({ user, onLogout }) {
               <FormTab
                 form={form} setForm={setForm} onSave={handleSave} onPhoto={handlePhoto} saving={saving}
                 machoOptions={machoOptions} femeaOptions={femeaOptions} parceiroOptions={parceiroOptions}
-                mutacoes={mutacoes} clientes={clientes} onCancel={() => setTab("lista")}
+                mutacoes={mutacoes} clientes={clientes} fornecedores={fornecedores} onCancel={() => setTab("lista")}
               />
             )}
 
@@ -871,9 +1031,15 @@ function AppInner({ user, onLogout }) {
             )}
 
             {tab === "clientes" && (
-
               <ClientesTab clientes={clientes} aves={aves} onSave={handleSaveCliente} onDelete={handleDeleteCliente} onImportar={handleImportarClientes} />
+            )}
 
+            {tab === "fornecedores" && (
+              <FornecedoresTab fornecedores={fornecedores} aves={aves} onSave={handleSaveFornecedor} onDelete={handleDeleteFornecedor} onImportar={handleImportarFornecedores} />
+            )}
+
+            {tab === "posvenda" && (
+              <PosVendaTab aves={aves} clientes={clientes} onUpdate={handleUpdatePosVenda} />
             )}
           </>
         )}
@@ -1216,11 +1382,88 @@ function SeletorComprador({ form, setForm, clientes }) {
   );
 }
 
-function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOptions, parceiroOptions, mutacoes, clientes, onCancel }) {
+function SeletorFornecedor({ form, setForm, fornecedores }) {
+  const [modo, setModo] = useState("existente");
+  const [busca, setBusca] = useState("");
+
+  const resultados = busca.trim()
+    ? fornecedores.filter((f) => {
+        const q = busca.trim().toLowerCase();
+        return (f.nome || "").toLowerCase().includes(q) || (f.telefone || "").includes(q);
+      })
+    : fornecedores;
+
+  function selecionar(f) {
+    setForm((form) => ({ ...form, fornecedorNome: f.nome, fornecedorTelefone: f.telefone, fornecedorEndereco: f.endereco, fornecedorId: f.id }));
+    setBusca(`${f.nome}${f.telefone ? " - " + f.telefone : ""}`);
+  }
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-3">
+        <button
+          type="button"
+          onClick={() => setModo("existente")}
+          className="ui-sans text-xs px-3 py-1.5 rounded-lg font-semibold"
+          style={{ background: modo === "existente" ? "#556b3f" : "#e3d3b4", color: modo === "existente" ? "#F1E6D2" : "#2B241C" }}
+        >
+          🔎 Selecionar fornecedor existente
+        </button>
+        <button
+          type="button"
+          onClick={() => setModo("novo")}
+          className="ui-sans text-xs px-3 py-1.5 rounded-lg font-semibold"
+          style={{ background: modo === "novo" ? "#556b3f" : "#e3d3b4", color: modo === "novo" ? "#F1E6D2" : "#2B241C" }}
+        >
+          + Novo fornecedor
+        </button>
+      </div>
+
+      {modo === "existente" && (
+        <div className="mb-2">
+          {fornecedores.length === 0 ? (
+            <div className="ui-sans text-xs" style={{ color: "#8a7a63" }}>
+              Voce ainda nao tem fornecedores cadastrados. Cadastre em "Fornecedores", ou usa "+ Novo fornecedor" aqui do lado.
+            </div>
+          ) : (
+            <>
+              <input
+                style={inputStyle}
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar fornecedor por nome ou telefone..."
+                className="w-full mb-2"
+              />
+              {busca.trim() && resultados.length > 0 && (
+                <div className="flex flex-col gap-1.5 mb-2">
+                  {resultados.slice(0, 6).map((f) => (
+                      <button
+                        type="button"
+                        key={f.id}
+                        onClick={() => selecionar(f)}
+                        className="ui-sans text-left text-sm px-3 py-2 rounded-lg flex items-center justify-between gap-2"
+                        style={{ background: "#FAF3E6", border: "1px solid #e3d3b4", color: "#2B241C" }}
+                      >
+                        <span>{f.nome}</span>
+                        {f.telefone && <span className="ui-mono text-xs" style={{ color: "#8a7a63" }}>{f.telefone}</span>}
+                      </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOptions, parceiroOptions, mutacoes, clientes, fornecedores, onCancel }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target?.type === "checkbox" ? e.target.checked : e.target.value }));
   // Editar manualmente os campos do comprador desfaz o vinculo com o cliente
   // selecionado (senao ficaria um clienteId apontando pra dado errado).
   const setComprador = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value, clienteId: "" }));
+  const setFornecedor = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value, fornecedorId: "" }));
 
   return (
     <div className="max-w-3xl">
@@ -1301,12 +1544,20 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
         </Field>
 
         {form.origemTipo === "Comprada" && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-            <Field label="Nome de quem vendeu"><input style={inputStyle} value={form.fornecedorNome} onChange={set("fornecedorNome")} /></Field>
-            <Field label="Telefone do vendedor"><input style={inputStyle} value={form.fornecedorTelefone} onChange={set("fornecedorTelefone")} /></Field>
-            <Field label="Endereco do vendedor"><input style={inputStyle} value={form.fornecedorEndereco} onChange={set("fornecedorEndereco")} /></Field>
-            <Field label="Valor pago (R$)"><input style={inputStyle} type="number" step="0.01" value={form.valorCompra} onChange={set("valorCompra")} /></Field>
-            <Field label="Data da compra"><input style={inputStyle} type="date" value={form.dataCompra} onChange={set("dataCompra")} /></Field>
+          <div className="mt-4">
+            <SeletorFornecedor form={form} setForm={setForm} fornecedores={fornecedores} />
+            {form.fornecedorId && (
+              <div className="ui-sans text-xs mt-2 mb-2 px-3 py-1.5 rounded-lg inline-block" style={{ background: "#e4ead9", color: "#556b3f" }}>
+                ✓ Vinculado ao cadastro do fornecedor
+              </div>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+              <Field label="Nome de quem vendeu"><input style={inputStyle} value={form.fornecedorNome} onChange={setFornecedor("fornecedorNome")} /></Field>
+              <Field label="Telefone do vendedor"><input style={inputStyle} value={form.fornecedorTelefone} onChange={setFornecedor("fornecedorTelefone")} /></Field>
+              <Field label="Endereco do vendedor"><input style={inputStyle} value={form.fornecedorEndereco} onChange={setFornecedor("fornecedorEndereco")} /></Field>
+              <Field label="Valor pago (R$)"><input style={inputStyle} type="number" step="0.01" value={form.valorCompra} onChange={set("valorCompra")} /></Field>
+              <Field label="Data da compra"><input style={inputStyle} type="date" value={form.dataCompra} onChange={set("dataCompra")} /></Field>
+            </div>
           </div>
         )}
 
@@ -1956,6 +2207,339 @@ function ClientesTab({ clientes, aves, onSave, onDelete, onImportar }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Fornecedores (espelha Clientes, so que do lado da compra)
+// ---------------------------------------------------------------------------
+
+function FornecedorCard({ f, historico, onOpen, onEdit }) {
+  return (
+    <Card className="p-4 ui-sans">
+      <div className="cursor-pointer" onClick={() => onOpen(f.id)}>
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <div className="font-semibold" style={{ color: "#2B241C" }}>{f.nome}</div>
+          {f.synced === false && <span className="text-[10px] font-semibold shrink-0" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</span>}
+        </div>
+        {f.telefone && (
+          <div className="text-xs flex items-center gap-1 mb-1" style={{ color: "#8a7a63" }}>
+            <Phone size={11} /> {f.telefone}
+          </div>
+        )}
+        <div className="flex gap-3 mt-2">
+          <span className="text-xs ui-mono" style={{ color: "#556b3f" }}>{historico.totalAves} {historico.totalAves === 1 ? "venda" : "vendas"}</span>
+          <span className="text-xs ui-mono" style={{ color: "#a6402b" }}>{money(historico.totalGasto)}</span>
+        </div>
+      </div>
+      <div className="flex gap-2 mt-3">
+        <button onClick={() => onEdit(f)} className="text-xs px-2 py-1 rounded flex items-center gap-1" style={{ background: "#e3d3b4", color: "#2B241C" }}>
+          <Pencil size={12} /> Editar
+        </button>
+        <button onClick={() => onOpen(f.id)} className="text-xs px-2 py-1 rounded" style={{ background: "#f0e6d2", color: "#8a6f2e" }}>
+          Ver historico
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function FornecedorForm({ inicial, onSave, onCancel, error }) {
+  const [f, setF] = useState(inicial);
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  return (
+    <Card className="p-4 sm:p-6 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <Field label="Nome"><input style={inputStyle} value={f.nome} onChange={set("nome")} placeholder="ex: Anderson (Barueri)" /></Field>
+        <Field label="Telefone"><input style={inputStyle} value={f.telefone} onChange={set("telefone")} placeholder="ex: (11) 99999-9999" /></Field>
+      </div>
+      <div className="grid grid-cols-1 gap-4 mb-4">
+        <Field label="Endereco"><input style={inputStyle} value={f.endereco} onChange={set("endereco")} placeholder="opcional" /></Field>
+        <Field label="Observacoes"><input style={inputStyle} value={f.observacoes} onChange={set("observacoes")} placeholder="opcional" /></Field>
+      </div>
+      {error && <div className="ui-sans text-sm mb-4 px-3 py-2 rounded-lg" style={{ background: "#f0dad4", color: "#a6402b" }}>{error}</div>}
+      <div className="flex gap-3">
+        <button onClick={() => onSave(f)} className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: "#C69A2E", color: "#2B1D14" }}>
+          <Save size={15} /> Salvar
+        </button>
+        <button onClick={onCancel} className="ui-sans px-4 py-2 rounded-lg text-sm" style={{ background: "#e3d3b4", color: "#2B241C" }}>Cancelar</button>
+      </div>
+    </Card>
+  );
+}
+
+function FornecedorDetalhe({ fornecedor, historico, onBack, onEdit, onDelete }) {
+  return (
+    <div>
+      <button onClick={onBack} className="ui-sans text-xs mb-4 px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>← Voltar pra lista</button>
+      <Card className="p-6 mb-6">
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <div className="text-xl font-bold ui-sans" style={{ color: "#2B241C" }}>{fornecedor.nome}</div>
+            {fornecedor.telefone && <div className="text-sm flex items-center gap-1 mt-1" style={{ color: "#8a7a63" }}><Phone size={13} /> {fornecedor.telefone}</div>}
+            {fornecedor.endereco && <div className="text-sm mt-1 ui-sans" style={{ color: "#8a7a63" }}>{fornecedor.endereco}</div>}
+            {fornecedor.observacoes && <div className="text-sm mt-1 italic ui-sans" style={{ color: "#8a7a63" }}>{fornecedor.observacoes}</div>}
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button onClick={() => onEdit(fornecedor)} className="text-xs px-2 py-1 rounded ui-sans" style={{ background: "#e3d3b4", color: "#2B241C" }}>Editar</button>
+            <button onClick={() => onDelete(fornecedor.id)} className="text-xs px-2 py-1 rounded flex items-center gap-1 ui-sans" style={{ background: "#f0dad4", color: "#a6402b" }}><Trash2 size={12} /> Remover</button>
+          </div>
+        </div>
+
+        <div className="grid gap-3 mb-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+          <SummaryCard label="Total de aves compradas dele" value={historico.totalAves} />
+          <SummaryCard label="Total gasto" value={money(historico.totalGasto)} />
+          <SummaryCard label="Ultima compra" value={historico.ultimaCompra || "-"} />
+        </div>
+      </Card>
+
+      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>HISTORICO DE COMPRAS</div>
+      {historico.compras.length === 0 ? (
+        <Card className="p-6 text-center ui-sans" style={{ color: "#8a7a63" }}>
+          Nenhuma compra encontrada com esse fornecedor ainda.
+        </Card>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {historico.compras.map((a) => (
+            <Card key={a.id} className="p-3 flex items-center gap-3 ui-sans">
+              <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
+                {a.foto ? <img src={a.foto} className="w-full h-full object-cover" alt="" /> : null}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{a.nome} <span className="font-normal" style={{ color: "#8a7a63" }}>({a.especie})</span></div>
+                <div className="text-xs" style={{ color: "#8a7a63" }}>{a.dataCompra || "sem data"}</div>
+              </div>
+              <div className="text-sm font-semibold" style={{ color: "#a6402b" }}>{money(a.valorCompra)}</div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FornecedoresTab({ fornecedores, aves, onSave, onDelete, onImportar }) {
+  const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [detalheId, setDetalheId] = useState(null);
+  const [formError, setFormError] = useState("");
+
+  const candidatos = fornecedoresCandidatosDeCompras(aves, fornecedores);
+
+  const filtrados = fornecedores.filter((f) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (f.nome || "").toLowerCase().includes(q) || (f.telefone || "").includes(q);
+  });
+
+  function salvar(fornecedor) {
+    const result = onSave(fornecedor);
+    if (result?.ok) {
+      setShowForm(false);
+      setEditando(null);
+      setFormError("");
+    } else {
+      setFormError(result?.error || "Nao consegui salvar.");
+    }
+  }
+
+  const fornecedorDetalhe = detalheId ? fornecedores.find((f) => f.id === detalheId) : null;
+  if (fornecedorDetalhe) {
+    const historico = historicoFornecedor(fornecedorDetalhe, aves);
+    return (
+      <div>
+        <SectionTitle>Fornecedores</SectionTitle>
+        <FornecedorDetalhe
+          fornecedor={fornecedorDetalhe}
+          historico={historico}
+          onBack={() => setDetalheId(null)}
+          onEdit={(f) => { setDetalheId(null); setEditando(f); setShowForm(true); setFormError(""); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+          onDelete={(id) => { onDelete(id); setDetalheId(null); }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <SectionTitle>Fornecedores</SectionTitle>
+        {!showForm && (
+          <button
+            onClick={() => { setEditando(emptyFornecedor()); setShowForm(true); setFormError(""); }}
+            className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
+            style={{ background: "#C69A2E", color: "#2B1D14" }}
+          >
+            <Plus size={16} /> Novo fornecedor
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <FornecedorForm
+          inicial={editando || emptyFornecedor()}
+          onSave={salvar}
+          onCancel={() => { setShowForm(false); setEditando(null); setFormError(""); }}
+          error={formError}
+        />
+      )}
+
+      {candidatos.length > 0 && !showForm && (
+        <Card className="p-4 mb-6">
+          <div className="ui-sans text-sm mb-3" style={{ color: "#2B241C" }}>
+            Encontramos <strong>{candidatos.length}</strong> {candidatos.length === 1 ? "vendedor" : "vendedores"} em compras ja cadastradas que ainda {candidatos.length === 1 ? "nao esta" : "nao estao"} na lista de fornecedores:
+          </div>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {candidatos.map((f, i) => (
+              <span key={i} className="ui-mono text-xs px-2 py-1 rounded" style={{ background: "#f0e6d2", color: "#8a6f2e" }}>
+                {f.nome}{f.telefone ? ` - ${f.telefone}` : ""}
+              </span>
+            ))}
+          </div>
+          <button
+            onClick={() => onImportar(candidatos)}
+            className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
+            style={{ background: "#556b3f", color: "#F1E6D2" }}
+          >
+            <Truck size={15} /> Importar {candidatos.length === 1 ? "esse vendedor" : "todos como fornecedores"}
+          </button>
+        </Card>
+      )}
+
+      <div className="relative mb-6 max-w-sm">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#8a7a63" }} />
+        <input
+          value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por nome ou telefone..."
+          className="ui-sans w-full pl-9 pr-3 py-2 rounded-lg text-sm outline-none"
+          style={{ background: "#FAF3E6", border: "1px solid #e3d3b4", color: "#2B241C" }}
+        />
+      </div>
+
+      {filtrados.length === 0 ? (
+        <Card className="p-8 text-center ui-sans" style={{ color: "#8a7a63" }}>
+          Nenhum fornecedor cadastrado ainda. Cadastre pelo nome/telefone de quem ja te vendeu (ou vai vender) uma ave.
+        </Card>
+      ) : (
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+          {filtrados.map((f) => (
+            <FornecedorCard
+              key={f.id}
+              f={f}
+              historico={historicoFornecedor(f, aves)}
+              onOpen={setDetalheId}
+              onEdit={(forn) => { setEditando(forn); setShowForm(true); setFormError(""); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pos-venda (Fase 4)
+// ---------------------------------------------------------------------------
+
+const POSVENDA_TONS = {
+  "Venda realizada": "default",
+  "Entregue": "gold",
+  "Primeiro contato": "gold",
+  "Acompanhamento": "gold",
+  "Cliente satisfeito": "good",
+};
+
+function PosVendaCard({ ave, cliente, onUpdate }) {
+  const tone = POSVENDA_TONS[ave.statusPosVenda] || "default";
+  const tones = {
+    default: "#e3d3b4",
+    gold: "#f0dab0",
+    good: "#c8dcb8",
+  };
+  return (
+    <Card className="p-4 ui-sans">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
+            {ave.foto ? <img src={ave.foto} className="w-full h-full object-cover" alt="" /> : null}
+          </div>
+          <div className="min-w-0">
+            <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{ave.nome}</div>
+            <div className="text-xs truncate" style={{ color: "#8a7a63" }}>
+              {cliente ? cliente.nome : (ave.compradorNome || "comprador nao identificado")}
+              {(cliente?.telefone || ave.compradorTelefone) ? ` - ${cliente?.telefone || ave.compradorTelefone}` : ""}
+            </div>
+            <div className="text-xs" style={{ color: "#8a7a63" }}>Vendida em {ave.dataVenda || "data nao informada"}</div>
+          </div>
+        </div>
+        <span className="text-[10px] px-2 py-1 rounded ui-mono shrink-0" style={{ background: tones[tone], color: "#2B241C" }}>{ave.statusPosVenda}</span>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+        <Field label="Status do pos-venda">
+          <select style={inputStyle} value={ave.statusPosVenda} onChange={(e) => onUpdate(ave.id, { statusPosVenda: e.target.value })}>
+            {STATUS_POSVENDA.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </Field>
+        <Field label="Cliente satisfeito">
+          <select style={inputStyle} value={ave.clienteSatisfeito || "Pendente"} onChange={(e) => onUpdate(ave.id, { clienteSatisfeito: e.target.value })}>
+            {SATISFACAO_OPCOES.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </Field>
+        <Field label="Data da entrega">
+          <input style={inputStyle} type="date" value={ave.dataEntrega || ""} onChange={(e) => onUpdate(ave.id, { dataEntrega: e.target.value })} />
+        </Field>
+        <Field label="Data do ultimo contato">
+          <input style={inputStyle} type="date" value={ave.dataUltimoContato || ""} onChange={(e) => onUpdate(ave.id, { dataUltimoContato: e.target.value })} />
+        </Field>
+      </div>
+      <Field label="Observacoes">
+        <input style={inputStyle} value={ave.obsPosVenda || ""} onChange={(e) => onUpdate(ave.id, { obsPosVenda: e.target.value })} placeholder="ex: pediu dica de alimentacao, tudo bem" />
+      </Field>
+      {ave.synced === false && <div className="text-[10px] mt-2 font-semibold" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</div>}
+    </Card>
+  );
+}
+
+function PosVendaTab({ aves, clientes, onUpdate }) {
+  const [filtroStatus, setFiltroStatus] = useState("");
+  const vendidas = aves
+    .filter((a) => a.status === "Vendida")
+    .filter((a) => !filtroStatus || (a.statusPosVenda || "Venda realizada") === filtroStatus)
+    .sort((a, b) => (b.dataVenda || "").localeCompare(a.dataVenda || ""));
+
+  const pendentes = aves.filter((a) => a.status === "Vendida" && (a.clienteSatisfeito || "Pendente") === "Pendente").length;
+
+  return (
+    <div>
+      <SectionTitle>Pos-venda</SectionTitle>
+
+      {pendentes > 0 && (
+        <div className="ui-sans mb-4 px-4 py-2 rounded-lg text-sm" style={{ background: "#f5e9c8", color: "#8a6f2e", border: "1px solid #d6c39a" }}>
+          {pendentes} {pendentes === 1 ? "venda esta" : "vendas estao"} com acompanhamento pendente.
+        </div>
+      )}
+
+      <Field label="Filtrar por status">
+        <select style={{ ...inputStyle, maxWidth: 280 }} value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)}>
+          <option value="">-- todos --</option>
+          {STATUS_POSVENDA.map((s) => <option key={s}>{s}</option>)}
+        </select>
+      </Field>
+
+      <div className="mt-4">
+        {vendidas.length === 0 ? (
+          <Card className="p-8 text-center ui-sans" style={{ color: "#8a7a63" }}>Nenhuma venda encontrada com esse filtro.</Card>
+        ) : (
+          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
+            {vendidas.map((a) => (
+              <PosVendaCard key={a.id} ave={a} cliente={clientes.find((c) => c.id === a.clienteId)} onUpdate={onUpdate} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
