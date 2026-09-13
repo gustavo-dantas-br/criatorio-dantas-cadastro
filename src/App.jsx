@@ -68,6 +68,7 @@ function emptyAve() {
     compradorEndereco: "",
     valorVenda: "",
     dataVenda: "",
+    clienteId: "",
     criadoEm: "",
   };
 }
@@ -350,17 +351,21 @@ function money(n) {
 // Historico do cliente e sempre CALCULADO na hora, cruzando pelo telefone com
 // as aves ja vendidas. Nao grava nada de novo nas aves, nao duplica dado.
 function historicoCliente(cliente, aves) {
-  const tel = normalizeTelefone(cliente.telefone);
-  const nome = (cliente.nome || "").trim().toLowerCase();
-  // Se o cliente tem telefone, casa por telefone (mais confiavel).
-  // Se NAO tem telefone (comum em cliente importado de uma venda antiga sem
-  // telefone preenchido), cai pra comparar pelo nome exato como alternativa.
-  const compras = aves.filter((a) => {
-    if (a.status !== "Vendida") return false;
-    if (tel) return normalizeTelefone(a.compradorTelefone) === tel;
-    if (nome) return (a.compradorNome || "").trim().toLowerCase() === nome;
-    return false;
-  });
+  const porId = aves.filter((a) => a.status === "Vendida" && a.clienteId === cliente.id);
+  let compras = porId;
+
+  if (compras.length === 0) {
+    // fallback pra vendas antigas que ainda nao tem o vinculo direto (clienteId)
+    const tel = normalizeTelefone(cliente.telefone);
+    const nome = (cliente.nome || "").trim().toLowerCase();
+    compras = aves.filter((a) => {
+      if (a.status !== "Vendida" || a.clienteId) return false; // ja vinculada a outro cliente, nao conta aqui
+      if (tel) return normalizeTelefone(a.compradorTelefone) === tel;
+      if (nome) return (a.compradorNome || "").trim().toLowerCase() === nome;
+      return false;
+    });
+  }
+
   const totalAves = compras.length;
   const totalGasto = compras.reduce((s, a) => s + (parseFloat(a.valorVenda) || 0), 0);
   const ultimaCompra = compras.reduce((max, a) => ((a.dataVenda || "") > max ? a.dataVenda : max), "");
@@ -484,7 +489,33 @@ function AppInner({ user, onLogout }) {
     setSaving(true);
     setError("");
     const id = form.id || uid();
-    const toSave = { ...form, id, criadoEm: form.criadoEm || new Date().toISOString() };
+    let toSave = { ...form, id, criadoEm: form.criadoEm || new Date().toISOString() };
+
+    // Vincula (ou cria) automaticamente o Cliente quando a ave e vendida.
+    // Se o usuario ja selecionou um cliente existente no formulario, o
+    // clienteId ja vem preenchido e nada precisa ser feito aqui.
+    if (toSave.status === "Vendida" && !toSave.clienteId && (toSave.compradorNome?.trim() || toSave.compradorTelefone?.trim())) {
+      const tel = normalizeTelefone(toSave.compradorTelefone);
+      const nomeBusca = (toSave.compradorNome || "").trim().toLowerCase();
+      let existente = null;
+      if (tel) existente = clientes.find((c) => normalizeTelefone(c.telefone) === tel);
+      if (!existente && nomeBusca) existente = clientes.find((c) => (c.nome || "").trim().toLowerCase() === nomeBusca);
+
+      if (existente) {
+        toSave.clienteId = existente.id;
+      } else {
+        const novoCliente = {
+          ...emptyCliente(),
+          id: uid(),
+          nome: toSave.compradorNome?.trim() || "(sem nome)",
+          telefone: toSave.compradorTelefone || "",
+          endereco: toSave.compradorEndereco || "",
+          observacoes: "Cliente criado automaticamente ao registrar essa venda.",
+        };
+        handleSaveCliente(novoCliente);
+        toSave.clienteId = novoCliente.id;
+      }
+    }
 
     setAves((prev) => {
       const others = prev.filter((a) => a.id !== id);
@@ -1121,7 +1152,7 @@ function SeletorComprador({ form, setForm, clientes }) {
     : clientes;
 
   function selecionar(c) {
-    setForm((f) => ({ ...f, compradorNome: c.nome, compradorTelefone: c.telefone, compradorEndereco: c.endereco }));
+    setForm((f) => ({ ...f, compradorNome: c.nome, compradorTelefone: c.telefone, compradorEndereco: c.endereco, clienteId: c.id }));
     setBusca(`${c.nome}${c.telefone ? " - " + c.telefone : ""}`);
   }
 
@@ -1187,6 +1218,9 @@ function SeletorComprador({ form, setForm, clientes }) {
 
 function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOptions, parceiroOptions, mutacoes, clientes, onCancel }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target?.type === "checkbox" ? e.target.checked : e.target.value }));
+  // Editar manualmente os campos do comprador desfaz o vinculo com o cliente
+  // selecionado (senao ficaria um clienteId apontando pra dado errado).
+  const setComprador = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value, clienteId: "" }));
 
   return (
     <div className="max-w-3xl">
@@ -1282,10 +1316,15 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
         {form.status === "Vendida" ? (
           <div>
             <SeletorComprador form={form} setForm={setForm} clientes={clientes} />
+            {form.clienteId && (
+              <div className="ui-sans text-xs mt-2 px-3 py-1.5 rounded-lg inline-block" style={{ background: "#e4ead9", color: "#556b3f" }}>
+                ✓ Vinculado ao cadastro do cliente
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-              <Field label="Nome do comprador"><input style={inputStyle} value={form.compradorNome} onChange={set("compradorNome")} /></Field>
-              <Field label="Telefone do comprador"><input style={inputStyle} value={form.compradorTelefone} onChange={set("compradorTelefone")} /></Field>
-              <Field label="Endereco do comprador"><input style={inputStyle} value={form.compradorEndereco} onChange={set("compradorEndereco")} /></Field>
+              <Field label="Nome do comprador"><input style={inputStyle} value={form.compradorNome} onChange={setComprador("compradorNome")} /></Field>
+              <Field label="Telefone do comprador"><input style={inputStyle} value={form.compradorTelefone} onChange={setComprador("compradorTelefone")} /></Field>
+              <Field label="Endereco do comprador"><input style={inputStyle} value={form.compradorEndereco} onChange={setComprador("compradorEndereco")} /></Field>
               <Field label="Valor vendido (R$)"><input style={inputStyle} type="number" step="0.01" value={form.valorVenda} onChange={set("valorVenda")} /></Field>
               <Field label="Data da venda"><input style={inputStyle} type="date" value={form.dataVenda} onChange={set("dataVenda")} /></Field>
             </div>
