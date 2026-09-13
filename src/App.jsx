@@ -360,6 +360,33 @@ function historicoCliente(cliente, aves) {
   return { compras: [...compras].sort((a, b) => (b.dataVenda || "").localeCompare(a.dataVenda || "")), totalAves, totalGasto, ultimaCompra };
 }
 
+
+// Varre as vendas ja cadastradas (aves com status Vendida) e acha compradores
+// que ainda nao viraram Cliente - pra poder importar sem duplicar.
+function clientesCandidatosDeVendas(aves, clientes) {
+  const telsExistentes = new Set(clientes.map((c) => normalizeTelefone(c.telefone)).filter(Boolean));
+  const nomesExistentes = new Set(clientes.map((c) => (c.nome || "").trim().toLowerCase()).filter(Boolean));
+
+  const vistos = new Map(); // chave -> candidato
+  aves.forEach((a) => {
+    if (a.status !== "Vendida") return;
+    const nome = (a.compradorNome || "").trim();
+    const tel = normalizeTelefone(a.compradorTelefone);
+    if (!nome && !tel) return;
+    const chave = tel || nome.toLowerCase();
+    if (tel && telsExistentes.has(tel)) return;
+    if (!tel && nomesExistentes.has(nome.toLowerCase())) return;
+    if (!vistos.has(chave)) {
+      vistos.set(chave, {
+        nome: nome || "(sem nome)",
+        telefone: a.compradorTelefone || "",
+        endereco: a.compradorEndereco || "",
+        observacoes: "Importado automaticamente de uma venda ja cadastrada.",
+      });
+    }
+  });
+  return Array.from(vistos.values());
+}
 // ---------------------------------------------------------------------------
 
 function AppInner({ user, onLogout }) {
@@ -409,15 +436,16 @@ function AppInner({ user, onLogout }) {
       }
     }, [user.id]);
 
-    const loadClientes = useCallback(async () => {
-      try {
-        const items = await listRows("clientes", user.id);
-        setClientes(items.map((c) => ({ ...c, synced: true })).sort((a, b) => (a.nome || "").localeCompare(b.nome || "")));
-      } catch {
-        // silencioso - se a tabela ainda nao existir no banco, so fica vazio
-      }
-    }, [user.id]);
+ 
 
+  const loadClientes = useCallback(async () => {
+    try {
+      const items = await listRows("clientes", user.id);
+      setClientes(items.map((c) => ({ ...c, synced: true })).sort((a, b) => (a.nome || "").localeCompare(b.nome || "")));
+    } catch {
+      // silencioso - se a tabela ainda nao existir no banco, so fica vazio
+    }
+  }, [user.id]);
 
   useEffect(() => {
     loadAves();
@@ -584,6 +612,21 @@ function AppInner({ user, onLogout }) {
     } catch {
       // ja removido localmente
     }
+  }
+
+  function handleImportarClientes(candidatos) {
+    const novos = candidatos.map((c) => ({
+      ...emptyCliente(),
+      ...c,
+      id: uid(),
+      criadoEm: new Date().toISOString(),
+    }));
+    setClientes((prev) => [...prev, ...novos.map((c) => ({ ...c, synced: false }))].sort((a, b) => (a.nome || "").localeCompare(b.nome || "")));
+    novos.forEach((c) => {
+      saveRow("clientes", user.id, c)
+        .then(() => setClientes((prev) => prev.map((x) => (x.id === c.id ? { ...x, synced: true } : x))))
+        .catch(() => setError(`"${c.nome}" foi importado na tela, mas nao sincronizou ainda. Use o botao de sincronizar depois.`));
+    });
   }
 
   useEffect(() => {
@@ -790,7 +833,9 @@ function AppInner({ user, onLogout }) {
             )}
 
             {tab === "clientes" && (
-              <ClientesTab clientes={clientes} aves={aves} onSave={handleSaveCliente} onDelete={handleDeleteCliente} />
+
+              <ClientesTab clientes={clientes} aves={aves} onSave={handleSaveCliente} onDelete={handleDeleteCliente} onImportar={handleImportarClientes} />
+
             )}
           </>
         )}
@@ -1660,12 +1705,14 @@ function ClienteDetalhe({ cliente, historico, onBack, onEdit, onDelete }) {
   );
 }
 
-function ClientesTab({ clientes, aves, onSave, onDelete }) {
+function ClientesTab({ clientes, aves, onSave, onDelete, onImportar }) {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editando, setEditando] = useState(null);
   const [detalheId, setDetalheId] = useState(null);
   const [formError, setFormError] = useState("");
+
+  const candidatos = clientesCandidatosDeVendas(aves, clientes);
 
   const filtrados = clientes.filter((c) => {
     const q = search.trim().toLowerCase();
@@ -1723,6 +1770,28 @@ function ClientesTab({ clientes, aves, onSave, onDelete }) {
           onCancel={() => { setShowForm(false); setEditando(null); setFormError(""); }}
           error={formError}
         />
+      )}
+
+      {candidatos.length > 0 && !showForm && (
+        <Card className="p-4 mb-6">
+          <div className="ui-sans text-sm mb-3" style={{ color: "#2B241C" }}>
+            Encontramos <strong>{candidatos.length}</strong> {candidatos.length === 1 ? "comprador" : "compradores"} em vendas ja cadastradas que ainda {candidatos.length === 1 ? "nao esta" : "nao estao"} na lista de clientes:
+          </div>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {candidatos.map((c, i) => (
+              <span key={i} className="ui-mono text-xs px-2 py-1 rounded" style={{ background: "#f0e6d2", color: "#8a6f2e" }}>
+                {c.nome}{c.telefone ? ` - ${c.telefone}` : ""}
+              </span>
+            ))}
+          </div>
+          <button
+            onClick={() => onImportar(candidatos)}
+            className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold"
+            style={{ background: "#556b3f", color: "#F1E6D2" }}
+          >
+            <Users size={15} /> Importar {candidatos.length === 1 ? "esse comprador" : "todos como clientes"}
+          </button>
+        </Card>
       )}
 
       <div className="relative mb-6 max-w-sm">
