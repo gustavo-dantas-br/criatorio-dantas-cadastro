@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Bird, Plus, Search, GitBranch, Tag, Upload, Trash2, X, Loader2, Save,
-  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil, ClipboardCheck, Truck,
+  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil, ClipboardCheck, Truck, MessageCircle,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 import { listRows, saveRow, deleteRow, uid } from "./lib/db";
@@ -107,6 +107,18 @@ function emptyFornecedor() {
 
 function normalizeTelefone(t) {
   return (t || "").replace(/\D/g, "");
+}
+
+// Monta o link do WhatsApp a partir de um telefone e uma mensagem opcional.
+// Funcao pura - nao le nem grava nada, so formata a URL.
+function whatsappUrl(telefone, mensagem) {
+  let digitos = normalizeTelefone(telefone);
+  if (!digitos) return null;
+  // Numeros brasileiros digitados sem DDI (10 ou 11 digitos com DDD) precisam
+  // do "55" na frente pro link do WhatsApp funcionar.
+  if (digitos.length <= 11) digitos = "55" + digitos;
+  const base = `https://wa.me/${digitos}`;
+  return mensagem ? `${base}?text=${encodeURIComponent(mensagem)}` : base;
 }
 
 // ---------- Compressao de foto ----------
@@ -2042,6 +2054,18 @@ function ClienteForm({ inicial, onSave, onCancel, error }) {
 }
 
 function ClienteDetalhe({ cliente, historico, onBack, onEdit, onDelete }) {
+  const [mostrarIndicacao, setMostrarIndicacao] = useState(false);
+
+  const primeiroNome = (cliente.nome || "").trim().split(" ")[0] || cliente.nome;
+  const ultimaAve = historico.compras[0]?.nome;
+  const mensagemPadrao =
+    `Oi, ${primeiroNome}! Tudo bem? 😊\n\n` +
+    `Queria saber como ${ultimaAve ? `o(a) ${ultimaAve} esta` : "a ave esta"} se adaptando a nova casa.\n\n` +
+    `Ficamos muito felizes em fazer parte desse momento! 🐦💙\n\n` +
+    `Se voce estiver satisfeito com nosso atendimento e conhecer alguem procurando uma ave, pode indicar o Criatorio Dantas. Sera um prazer atender sua indicacao!`;
+
+  const [mensagem, setMensagem] = useState(mensagemPadrao);
+
   return (
     <div>
       <button onClick={onBack} className="ui-sans text-xs mb-4 px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>← Voltar pra lista</button>
@@ -2059,7 +2083,61 @@ function ClienteDetalhe({ cliente, historico, onBack, onEdit, onDelete }) {
           </div>
         </div>
 
-        <div className="grid gap-3 mb-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+        {cliente.telefone ? (
+          <div className="flex flex-wrap gap-2 mb-4">
+            <a
+              href={whatsappUrl(cliente.telefone)}
+              target="_blank" rel="noopener noreferrer"
+              className="ui-sans flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
+              style={{ background: "#556b3f", color: "#F1E6D2" }}
+            >
+              <MessageCircle size={15} /> Falar com cliente
+            </a>
+            <button
+              onClick={() => setMostrarIndicacao((v) => !v)}
+              className="ui-sans flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
+              style={{ background: "#C69A2E", color: "#2B1D14" }}
+            >
+              🤝 Pedir indicacao
+            </button>
+          </div>
+        ) : (
+          <div className="ui-sans text-xs mb-4" style={{ color: "#8a7a63" }}>
+            Cadastra um telefone pra esse cliente pra poder falar por WhatsApp direto daqui.
+          </div>
+        )}
+
+        {mostrarIndicacao && cliente.telefone && (
+          <div className="mb-2 p-3 rounded-lg" style={{ background: "#f5f0e4", border: "1px solid #e3d3b4" }}>
+            <div className="ui-mono text-xs mb-2" style={{ color: "#8a7a63" }}>MENSAGEM (edite antes de enviar)</div>
+            <textarea
+              value={mensagem}
+              onChange={(e) => setMensagem(e.target.value)}
+              rows={6}
+              className="ui-sans w-full rounded-lg p-2 text-sm"
+              style={{ background: "#fff", border: "1px solid #e3d3b4", color: "#2B241C", resize: "vertical" }}
+            />
+            <div className="flex gap-2 mt-2">
+              <a
+                href={whatsappUrl(cliente.telefone, mensagem)}
+                target="_blank" rel="noopener noreferrer"
+                className="ui-sans flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
+                style={{ background: "#556b3f", color: "#F1E6D2" }}
+              >
+                <MessageCircle size={15} /> Abrir WhatsApp com essa mensagem
+              </a>
+              <button
+                onClick={() => setMensagem(mensagemPadrao)}
+                className="ui-sans text-xs px-3 py-2 rounded-lg"
+                style={{ background: "#e3d3b4", color: "#2B241C" }}
+              >
+                Restaurar sugestao
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="grid gap-3 mb-2 mt-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
           <SummaryCard label="Total de aves compradas" value={historico.totalAves} />
           <SummaryCard label="Total gasto" value={money(historico.totalGasto)} tone="good" />
           <SummaryCard label="Ultima compra" value={historico.ultimaCompra || "-"} />
