@@ -606,7 +606,7 @@ function AppInner({ user, onLogout }) {
     }
   }, [user.id]);
 
-  const loadPerfil = useCallback(async () => {
+    const loadPerfil = useCallback(async () => {
     try {
       const p = await getPerfil(user.id);
       if (p) setPerfil({ ...emptyPerfilCriador(), ...p, synced: true });
@@ -615,7 +615,26 @@ function AppInner({ user, onLogout }) {
     }
   }, [user.id]);
 
-  
+  const loadAdminStatus = useCallback(async () => {
+    try {
+      const admin = await checkIsAdmin(user.id);
+      setIsAdminUser(admin);
+
+      if (admin) {
+        const [todos, perfis] = await Promise.all([
+          listTodosAnunciosParaAdmin(),
+          listPerfisPublicos(),
+        ]);
+
+        setAnunciosAprovacao(todos);
+        setPerfisPublicos(perfis);
+      }
+    } catch {
+      // silencioso - se a tabela 'admins' ainda nao existir, so nao mostra o painel
+    }
+  }, [user.id]);
+
+   
   useEffect(() => {
     loadAves();
     loadDespesas();
