@@ -48,6 +48,7 @@ function emptyAve() {
     especie: "Ring Neck",
     sexo: "Indefinido",
     corMutacao: "",
+    portadores: [],
     corAnilha: "",
     anilha: "",
     nascimento: "",
@@ -1221,7 +1222,17 @@ function AppInner({ user, onLogout }) {
             )}
 
             {tab === "mutacoes" && (
-              <MutacoesTab mutacoes={mutacoes} onSave={handleSaveMutacao} onDelete={handleDeleteMutacao} />
+  <>
+              <CalculadoraGenetica aves={aves} mutacoes={mutacoes} />
+
+              <div className="my-8 h-px" style={{ background: "#e3d3b4" }} />
+
+              <MutacoesTab
+              mutacoes={mutacoes}
+            onSave={handleSaveMutacao}
+      onDelete={handleDeleteMutacao}
+    />
+  </>
             )}
 
             {tab === "clientes" && (
@@ -1706,11 +1717,73 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
               <select style={inputStyle} value={form.sexo} onChange={set("sexo")}>{SEXOS.map((s) => <option key={s}>{s}</option>)}</select>
             </Field>
             <Field label="Mutacao / Cor">
-              <input style={inputStyle} list="lista-mutacoes" value={form.corMutacao} onChange={set("corMutacao")} placeholder="ex: Cremina" />
-              <datalist id="lista-mutacoes">
-                {mutacoes.map((m) => <option key={m.id} value={m.nome} />)}
-              </datalist>
-            </Field>
+  <input
+    style={inputStyle}
+    list="lista-mutacoes"
+    value={form.corMutacao}
+    onChange={set("corMutacao")}
+    placeholder="ex: Cremina"
+  />
+
+  <datalist id="lista-mutacoes">
+    {mutacoes.map((m) => (
+      <option key={m.id} value={m.nome} />
+    ))}
+  </datalist>
+</Field>
+
+<Field label="Portador de">
+  <div
+    className="rounded-xl p-3"
+    style={{
+      background: "#fffaf0",
+      border: "1px solid #d8c6a5",
+    }}
+  >
+    {mutacoes.length === 0 ? (
+      <div className="text-sm" style={{ color: "#8a7a63" }}>
+        Nenhuma mutacao cadastrada.
+      </div>
+    ) : (
+      <div className="space-y-2">
+        {mutacoes.map((mutacao) => {
+          const selecionado = (form.portadores || []).includes(mutacao.nome);
+
+          return (
+            <label
+              key={mutacao.id}
+              className="flex items-center gap-2 text-sm cursor-pointer"
+              style={{ color: "#4f4336" }}
+            >
+              <input
+                type="checkbox"
+                checked={selecionado}
+                onChange={(e) => {
+                  const atuais = form.portadores || [];
+
+                  const novos = e.target.checked
+                    ? [...new Set([...atuais, mutacao.nome])]
+                    : atuais.filter((nome) => nome !== mutacao.nome);
+
+                  setForm({
+                    ...form,
+                    portadores: novos,
+                  });
+                }}
+              />
+
+              <span>{mutacao.nome}</span>
+            </label>
+          );
+        })}
+      </div>
+    )}
+  </div>
+
+  <p className="text-xs mt-2" style={{ color: "#8a7a63" }}>
+    Marque as mutacoes que a ave carrega sem apresentar visualmente.
+  </p>
+</Field>
           </div>
         </div>
 
@@ -2123,6 +2196,336 @@ function FinanceiroTab({ aves, despesas, onSaveDespesa, onDeleteDespesa }) {
 // Banco de Genetica
 // ---------------------------------------------------------------------------
 
+function CalculadoraGenetica({ aves, mutacoes }) {
+  const [paiId, setPaiId] = useState("");
+  const [maeId, setMaeId] = useState("");
+  const [resultado, setResultado] = useState(null);
+
+  const machos = aves.filter((a) => a.sexo === "Macho");
+  const femeas = aves.filter((a) => a.sexo === "Femea");
+
+  const pai = aves.find((a) => a.id === paiId);
+  const mae = aves.find((a) => a.id === maeId);
+
+  function calcular() {
+    if (!pai || !mae) {
+      setResultado({
+        tipo: "erro",
+        mensagem: "Selecione o pai e a mae para calcular.",
+      });
+      return;
+    }
+
+    const normalizar = (valor) =>
+      (valor || "").trim().toLowerCase();
+
+    function obterGenotipoAzul(ave) {
+      const mutacao = normalizar(ave.corMutacao);
+      const portadores = (ave.portadores || []).map(normalizar);
+
+      if (mutacao === "azul") {
+        return "bb";
+      }
+
+      if (portadores.includes("azul")) {
+        return "Bb";
+      }
+
+      return "BB";
+    }
+
+    const genotipoPai = obterGenotipoAzul(pai);
+    const genotipoMae = obterGenotipoAzul(mae);
+
+    const alelosPai = genotipoPai.split("");
+    const alelosMae = genotipoMae.split("");
+
+    const combinacoes = [];
+
+    alelosPai.forEach((aleloPai) => {
+      alelosMae.forEach((aleloMae) => {
+        const genes = [aleloPai, aleloMae]
+          .sort()
+          .join("");
+
+        combinacoes.push(genes);
+      });
+    });
+
+    const quantidade = {
+      BB: 0,
+      Bb: 0,
+      bb: 0,
+    };
+
+    combinacoes.forEach((genes) => {
+      if (genes === "BB") {
+        quantidade.BB++;
+      } else if (genes === "Bb" || genes === "bB") {
+        quantidade.Bb++;
+      } else if (genes === "bb") {
+        quantidade.bb++;
+      }
+    });
+
+    const total = combinacoes.length;
+
+    const percentualBB = (quantidade.BB / total) * 100;
+    const percentualBb = (quantidade.Bb / total) * 100;
+    const percentualAzul = (quantidade.bb / total) * 100;
+
+    const possibilidades = [];
+
+    if (percentualBB > 0) {
+      possibilidades.push({
+        nome: "Verde",
+        percentual: `${percentualBB}%`,
+        detalhe: "sem azul registrado",
+      });
+    }
+
+    if (percentualBb > 0) {
+      possibilidades.push({
+        nome: "Verde",
+        percentual: `${percentualBb}%`,
+        detalhe: "portador de Azul",
+      });
+    }
+
+    if (percentualAzul > 0) {
+      possibilidades.push({
+        nome: "Azul",
+        percentual: `${percentualAzul}%`,
+        detalhe: "visual",
+      });
+    }
+
+    setResultado({
+      tipo: "sucesso",
+      titulo: "Resultado do cruzamento",
+      cruzamento: `${pai.corMutacao || "Sem mutacao"} x ${
+        mae.corMutacao || "Sem mutacao"
+      }`,
+      genotipos: `${genotipoPai} x ${genotipoMae}`,
+      possibilidades,
+      observacao:
+        "O calculo considera o locus Azul e os portadores de Azul registrados no cadastro das aves.",
+    });
+  }
+
+  return (
+    <div className="space-y-6">
+      <div
+        className="rounded-2xl p-5"
+        style={{
+          background: "#FAF3E6",
+          border: "1px solid #e3d3b4",
+        }}
+      >
+        <div className="ui-mono text-xs mb-2" style={{ color: "#8a7a63" }}>
+          CALCULADORA GENETICA
+        </div>
+
+        <h2
+          className="text-2xl font-semibold mb-2"
+          style={{ color: "#2B241C" }}
+        >
+          Cruzamento de Ring Neck
+        </h2>
+
+        <p className="text-sm" style={{ color: "#6f6254" }}>
+          Selecione o pai e a mae cadastrados para calcular as possibilidades
+          conhecidas.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div
+          className="rounded-2xl p-5"
+          style={{
+            background: "#FAF3E6",
+            border: "1px solid #e3d3b4",
+          }}
+        >
+          <div className="ui-mono text-xs mb-3" style={{ color: "#8a7a63" }}>
+            PAI
+          </div>
+
+          <select
+            className="w-full rounded-xl px-3 py-3"
+            style={{
+              border: "1px solid #d8c6a5",
+              background: "#fffaf0",
+              color: "#2B241C",
+            }}
+            value={paiId}
+            onChange={(e) => {
+              setPaiId(e.target.value);
+              setResultado(null);
+            }}
+          >
+            <option value="">-- selecione o pai --</option>
+
+            {machos.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.nome} - {a.corMutacao || "Sem mutacao"}
+              </option>
+            ))}
+          </select>
+
+          {pai && (
+            <div className="mt-4 text-sm" style={{ color: "#5e5143" }}>
+              <strong>{pai.nome}</strong>
+              <br />
+              Mutacao: {pai.corMutacao || "Nao informada"}
+              <br />
+              Portador de:{" "}
+              {(pai.portadores || []).length > 0
+                ? pai.portadores.join(", ")
+                : "Nenhuma informada"}
+            </div>
+          )}
+        </div>
+
+        <div
+          className="rounded-2xl p-5"
+          style={{
+            background: "#FAF3E6",
+            border: "1px solid #e3d3b4",
+          }}
+        >
+          <div className="ui-mono text-xs mb-3" style={{ color: "#8a7a63" }}>
+            MAE
+          </div>
+
+          <select
+            className="w-full rounded-xl px-3 py-3"
+            style={{
+              border: "1px solid #d8c6a5",
+              background: "#fffaf0",
+              color: "#2B241C",
+            }}
+            value={maeId}
+            onChange={(e) => {
+              setMaeId(e.target.value);
+              setResultado(null);
+            }}
+          >
+            <option value="">-- selecione a mae --</option>
+
+            {femeas.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.nome} - {a.corMutacao || "Sem mutacao"}
+              </option>
+            ))}
+          </select>
+
+          {mae && (
+            <div className="mt-4 text-sm" style={{ color: "#5e5143" }}>
+              <strong>{mae.nome}</strong>
+              <br />
+              Mutacao: {mae.corMutacao || "Nao informada"}
+              <br />
+              Portador de:{" "}
+              {(mae.portadores || []).length > 0
+                ? mae.portadores.join(", ")
+                : "Nenhuma informada"}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <button
+        onClick={calcular}
+        className="px-5 py-3 rounded-xl font-semibold"
+        style={{
+          background: "#C69A2E",
+          color: "#2B241C",
+        }}
+      >
+        Calcular cruzamento
+      </button>
+
+      {resultado && (
+        <div
+          className="rounded-2xl p-5"
+          style={{
+            background: "#FAF3E6",
+            border: "1px solid #e3d3b4",
+          }}
+        >
+          {resultado.tipo === "erro" && (
+            <div style={{ color: "#A6402B" }}>
+              {resultado.mensagem}
+            </div>
+          )}
+
+          {resultado.tipo === "sucesso" && (
+            <>
+              <div
+                className="ui-mono text-xs mb-2"
+                style={{ color: "#8a7a63" }}
+              >
+                {resultado.titulo}
+              </div>
+
+              <div
+                className="text-xl font-semibold"
+                style={{ color: "#2B241C" }}
+              >
+                {resultado.cruzamento}
+              </div>
+
+              <div
+                className="mt-2 text-sm"
+                style={{ color: "#8a7a63" }}
+              >
+                Genotipo considerado: {resultado.genotipos}
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {resultado.possibilidades.map((item, index) => (
+                  <div
+                    key={`${item.nome}-${item.detalhe}-${index}`}
+                    className="flex items-center justify-between rounded-xl px-4 py-3"
+                    style={{
+                      background: "#f2e8d4",
+                      border: "1px solid #dfcba7",
+                    }}
+                  >
+                    <div>
+                      <div className="font-semibold">
+                        {item.nome}
+                      </div>
+
+                      <div
+                        className="text-xs mt-1"
+                        style={{ color: "#8a7a63" }}
+                      >
+                        {item.detalhe}
+                      </div>
+                    </div>
+
+                    <span className="font-semibold">
+                      {item.percentual}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <p
+                className="mt-4 text-sm"
+                style={{ color: "#6f6254" }}
+              >
+                {resultado.observacao}
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 function MutacoesTab({ mutacoes, onSave, onDelete }) {
   const [nova, setNova] = useState(emptyMutacao());
   const [editId, setEditId] = useState(null);
