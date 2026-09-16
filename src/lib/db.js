@@ -94,3 +94,4 @@ export async function listPerfisPublicos() {
   if (error) throw error;
   return (data || []).map((r) => ({ userId: r.user_id, ...r.data }));
 }
+

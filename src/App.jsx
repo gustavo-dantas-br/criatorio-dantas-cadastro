@@ -3,11 +3,14 @@ import {
   Bird, Plus, Search, GitBranch, Tag, Upload, Trash2, X, Loader2, Save,
   Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil, ClipboardCheck, Truck, MessageCircle, Handshake, Megaphone, UserCircle, ShieldCheck, Check,
 } from "lucide-react";
+
 import { supabase } from "./supabaseClient";
+
 import {
   listRows, saveRow, deleteRow, uid, getPerfil, savePerfil, listAnuncios, saveAnuncio, deleteAnuncio,
   checkIsAdmin, listTodosAnunciosParaAdmin, updateAnuncioStatus, listPerfisPublicos,
 } from "./lib/db";
+
 import AuthPage from "./components/AuthPage";
 
 // ---------------------------------------------------------------------------
@@ -523,6 +526,9 @@ function AppInner({ user, onLogout }) {
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [anunciosAprovacao, setAnunciosAprovacao] = useState([]);
   const [perfisPublicos, setPerfisPublicos] = useState([]);
+  const [isAdminUser, setIsAdminUser] = useState(false);
+  const [anunciosAprovacao, setAnunciosAprovacao] = useState([]);
+  const [perfisPublicos, setPerfisPublicos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
@@ -952,17 +958,17 @@ function AppInner({ user, onLogout }) {
     }
   }
 
-  function handleSaveAnuncio(anuncio) {
-    if (!anuncio.aveId) return { ok: false, error: "Selecione a ave pra anunciar." };
-    if (!anuncio.preco) return { ok: false, error: "Informe o preco do anuncio." };
-    const id = anuncio.id || uid();
-    const ehNovo = !anuncio.id;
-    const toSave = { ...anuncio, id, criadoEm: anuncio.criadoEm || new Date().toISOString() };
-    setAnuncios((prev) => {
-      const others = prev.filter((a) => a.id !== id);
-      // anuncio novo sempre comeca "pendente" (so entra no ar depois de aprovado)
-      return [...others, { ...toSave, status: ehNovo ? "pendente" : toSave.status, synced: false }];
-    });
+ function handleSaveAnuncio(anuncio) {
+  if (!anuncio.aveId) return { ok: false, error: "Selecione a ave pra anunciar." };
+  if (!anuncio.preco) return { ok: false, error: "Informe o preco do anuncio." };
+  const id = anuncio.id || uid();
+  const ehNovo = !anuncio.id;
+  const toSave = { ...anuncio, id, criadoEm: anuncio.criadoEm || new Date().toISOString() };
+  setAnuncios((prev) => {
+    const others = prev.filter((a) => a.id !== id);
+    // anuncio novo sempre comeca "pendente" (so entra no ar depois de aprovado)
+    return [...others, { ...toSave, status: ehNovo ? "pendente" : toSave.status, synced: false }];
+  });
     saveAnuncio(user.id, toSave)
       .then(() => setAnuncios((prev) => prev.map((a) => (a.id === id ? { ...a, synced: true } : a))))
       .catch((e) => setError(
@@ -970,7 +976,7 @@ function AppInner({ user, onLogout }) {
         "Se as tabelas 'anuncios'/'perfil_criador' ainda nao existem no seu Supabase, roda o schema_fase_anuncios.sql no SQL Editor."
       ));
     return { ok: true };
-  }
+    }
 
   function handleToggleAnuncioAtivo(anuncio) {
     handleSaveAnuncio({ ...anuncio, ativo: !anuncio.ativo });
@@ -1134,6 +1140,8 @@ function AppInner({ user, onLogout }) {
             { id: "anuncios", label: "Anuncios", icon: Megaphone },
             { id: "perfil", label: "Perfil", icon: UserCircle },
             ...(isAdminUser ? [{ id: "aprovacoes", label: "Aprovacoes", icon: ShieldCheck }] : []),
+
+
             { id: "mutacoes", label: "Genetica", icon: Dna },
           ].map(({ id, label: lbl, icon: Icon }) => (
             <button
@@ -1240,6 +1248,7 @@ function AppInner({ user, onLogout }) {
             {tab === "perfil" && (
               <PerfilTab perfil={perfil} onSave={handleSavePerfil} />
             )}
+
 
             {tab === "aprovacoes" && isAdminUser && (
               <AprovacoesTab anuncios={anunciosAprovacao} perfis={perfisPublicos} onModerar={handleModerarAnuncio} />
@@ -3104,11 +3113,12 @@ function NovoAnuncioForm({ ave, onSave, onCancel }) {
   );
 }
 
-const STATUS_ANUNCIO_TONS = { pendente: "#f0dab0", aprovado: "#c8dcb8", rejeitado: "#f0c9c0" };
-const STATUS_ANUNCIO_LABEL = { pendente: "EM ANALISE", aprovado: "APROVADO", rejeitado: "REJEITADO" };
 
-function AnuncioCard({ anuncio, onToggleAtivo, onDelete }) {
-  const status = anuncio.status || "pendente";
+       const STATUS_ANUNCIO_TONS = { pendente: "#f0dab0", aprovado: "#c8dcb8", rejeitado: "#f0c9c0" };
+       const STATUS_ANUNCIO_LABEL = { pendente: "EM ANALISE", aprovado: "APROVADO", rejeitado: "REJEITADO" };
+
+ function AnuncioCard({ anuncio, onToggleAtivo, onDelete }) {
+       const status = anuncio.status || "pendente";
   return (
     <Card className="p-3 flex items-center gap-3 ui-sans">
       <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
