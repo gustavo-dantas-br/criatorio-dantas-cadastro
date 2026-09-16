@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Bird, Plus, Search, GitBranch, Tag, Upload, Trash2, X, Loader2, Save,
-  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil, ClipboardCheck, Truck, MessageCircle, Handshake,
+  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil, ClipboardCheck, Truck, MessageCircle, Handshake, Megaphone, UserCircle,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
-import { listRows, saveRow, deleteRow, uid } from "./lib/db";
+import { listRows, saveRow, deleteRow, uid, getPerfil, savePerfil, listAnuncios, saveAnuncio, deleteAnuncio } from "./lib/db";
 import AuthPage from "./components/AuthPage";
 
 // ---------------------------------------------------------------------------
@@ -109,6 +109,27 @@ function emptyIndicacao() {
     observacoes: "",
     criadoEm: "",
   };
+}
+
+function emptyAnuncio() {
+  return {
+    id: null,
+    aveId: "",
+    nomeAve: "",
+    especie: "",
+    corMutacao: "",
+    sexo: "",
+    nascimento: "",
+    foto: "",
+    preco: "",
+    descricao: "",
+    ativo: true,
+    criadoEm: "",
+  };
+}
+
+function emptyPerfilCriador() {
+  return { nomeCriatorio: "", cidade: "", uf: "", whatsapp: "" };
 }
 
 function emptyCliente() {
@@ -494,6 +515,8 @@ function AppInner({ user, onLogout }) {
   const [clientes, setClientes] = useState([]);
   const [fornecedores, setFornecedores] = useState([]);
   const [indicacoes, setIndicacoes] = useState([]);
+  const [anuncios, setAnuncios] = useState([]);
+  const [perfil, setPerfil] = useState(emptyPerfilCriador());
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
@@ -565,6 +588,24 @@ function AppInner({ user, onLogout }) {
     }
   }, [user.id]);
 
+  const loadAnuncios = useCallback(async () => {
+    try {
+      const items = await listAnuncios(user.id);
+      setAnuncios(items.map((a) => ({ ...a, synced: true })));
+    } catch {
+      // silencioso - se a tabela ainda nao existir no banco, so fica vazio
+    }
+  }, [user.id]);
+
+  const loadPerfil = useCallback(async () => {
+    try {
+      const p = await getPerfil(user.id);
+      if (p) setPerfil({ ...emptyPerfilCriador(), ...p, synced: true });
+    } catch {
+      // silencioso - se a tabela ainda nao existir no banco, fica com o perfil vazio
+    }
+  }, [user.id]);
+
   useEffect(() => {
     loadAves();
     loadDespesas();
@@ -572,7 +613,9 @@ function AppInner({ user, onLogout }) {
     loadClientes();
     loadFornecedores();
     loadIndicacoes();
-  }, [loadAves, loadDespesas, loadMutacoes, loadClientes, loadFornecedores, loadIndicacoes]);
+    loadAnuncios();
+    loadPerfil();
+  }, [loadAves, loadDespesas, loadMutacoes, loadClientes, loadFornecedores, loadIndicacoes, loadAnuncios, loadPerfil]);
 
   function startNew() {
     setForm(emptyAve());
@@ -888,6 +931,47 @@ function AppInner({ user, onLogout }) {
     }
   }
 
+  function handleSaveAnuncio(anuncio) {
+    if (!anuncio.aveId) return { ok: false, error: "Selecione a ave pra anunciar." };
+    if (!anuncio.preco) return { ok: false, error: "Informe o preco do anuncio." };
+    const id = anuncio.id || uid();
+    const toSave = { ...anuncio, id, criadoEm: anuncio.criadoEm || new Date().toISOString() };
+    setAnuncios((prev) => {
+      const others = prev.filter((a) => a.id !== id);
+      return [...others, { ...toSave, synced: false }];
+    });
+    saveAnuncio(user.id, toSave)
+      .then(() => setAnuncios((prev) => prev.map((a) => (a.id === id ? { ...a, synced: true } : a))))
+      .catch((e) => setError(
+        `Anuncio ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}). ` +
+        "Se as tabelas 'anuncios'/'perfil_criador' ainda nao existem no seu Supabase, roda o schema_fase_anuncios.sql no SQL Editor."
+      ));
+    return { ok: true };
+  }
+
+  function handleToggleAnuncioAtivo(anuncio) {
+    handleSaveAnuncio({ ...anuncio, ativo: !anuncio.ativo });
+  }
+
+  async function handleDeleteAnuncio(id) {
+    setAnuncios((prev) => prev.filter((a) => a.id !== id));
+    try {
+      await deleteAnuncio(id);
+    } catch {
+      // ja removido localmente
+    }
+  }
+
+  function handleSavePerfil(novoPerfil) {
+    setPerfil({ ...novoPerfil, synced: false });
+    savePerfil(user.id, novoPerfil)
+      .then(() => setPerfil({ ...novoPerfil, synced: true }))
+      .catch((e) => setError(
+        `Perfil ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}). ` +
+        "Se a tabela 'perfil_criador' ainda nao existe no seu Supabase, roda o schema_fase_anuncios.sql no SQL Editor."
+      ));
+  }
+
   useEffect(() => {
     if (tab !== "placa" || !placaId) return;
     const ave = aves.find((a) => a.id === placaId);
@@ -1015,6 +1099,8 @@ function AppInner({ user, onLogout }) {
             { id: "fornecedores", label: "Fornecedores", icon: Truck },
             { id: "posvenda", label: "Pos-venda", icon: ClipboardCheck },
             { id: "indicacoes", label: "Indicacoes", icon: Handshake },
+            { id: "anuncios", label: "Anuncios", icon: Megaphone },
+            { id: "perfil", label: "Perfil", icon: UserCircle },
             { id: "mutacoes", label: "Genetica", icon: Dna },
           ].map(({ id, label: lbl, icon: Icon }) => (
             <button
@@ -1108,6 +1194,18 @@ function AppInner({ user, onLogout }) {
 
             {tab === "indicacoes" && (
               <IndicacoesTab indicacoes={indicacoes} clientes={clientes} onSave={handleSaveIndicacao} onDelete={handleDeleteIndicacao} />
+            )}
+
+            {tab === "anuncios" && (
+              <AnunciosTab
+                aves={aves} anuncios={anuncios} perfil={perfil}
+                onSave={handleSaveAnuncio} onToggleAtivo={handleToggleAnuncioAtivo} onDelete={handleDeleteAnuncio}
+                setTab={setTab}
+              />
+            )}
+
+            {tab === "perfil" && (
+              <PerfilTab perfil={perfil} onSave={handleSavePerfil} />
             )}
           </>
         )}
@@ -2778,6 +2876,61 @@ function NovaIndicacaoForm({ clientes, onSave }) {
   );
 }
 
+// Ranking e metricas de indicacao - tudo calculado na hora a partir do que
+// ja existe em `indicacoes`, sem nenhum campo ou tabela nova.
+function metricasIndicacoes(indicacoes, clientes) {
+  const total = indicacoes.length;
+  const convertidas = indicacoes.filter((i) => i.status === "Venda realizada").length;
+  const naoConverteu = indicacoes.filter((i) => i.status === "Nao converteu").length;
+  const taxaConversao = total > 0 ? (convertidas / total) * 100 : 0;
+
+  const contagem = new Map(); // clienteId -> count
+  indicacoes.forEach((i) => {
+    if (!i.clienteIndicouId) return;
+    contagem.set(i.clienteIndicouId, (contagem.get(i.clienteIndicouId) || 0) + 1);
+  });
+
+  const ranking = Array.from(contagem.entries())
+    .map(([clienteId, count]) => ({ cliente: clientes.find((c) => c.id === clienteId), count }))
+    .filter((r) => r.cliente)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  return { total, convertidas, naoConverteu, taxaConversao, ranking };
+}
+
+function RankingIndicacoes({ indicacoes, clientes }) {
+  const m = metricasIndicacoes(indicacoes, clientes);
+  const medalhas = ["🏆", "🥈", "🥉"];
+
+  return (
+    <div className="mb-6">
+      <div className="grid gap-3 mb-4" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+        <SummaryCard label="Total de indicacoes" value={m.total} />
+        <SummaryCard label="Viraram venda" value={m.convertidas} tone="good" />
+        <SummaryCard label="Nao converteram" value={m.naoConverteu} tone="bad" />
+        <SummaryCard label="Taxa de conversao" value={`${m.taxaConversao.toFixed(0)}%`} />
+      </div>
+
+      {m.ranking.length > 0 && (
+        <Card className="p-4">
+          <div className="ui-mono text-xs mb-3" style={{ color: "#8a7a63" }}>QUEM MAIS INDICA</div>
+          <div className="flex flex-col gap-2">
+            {m.ranking.map((r, i) => (
+              <div key={r.cliente.id} className="flex items-center justify-between ui-sans text-sm">
+                <span style={{ color: "#2B241C" }}>
+                  {medalhas[i] || `${i + 1}º`} {r.cliente.nome}
+                </span>
+                <span className="ui-mono" style={{ color: "#8a6f2e" }}>{r.count} {r.count === 1 ? "indicacao" : "indicacoes"}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function IndicacoesTab({ indicacoes, clientes, onSave, onDelete }) {
   const [filtroStatus, setFiltroStatus] = useState("");
 
@@ -2786,6 +2939,8 @@ function IndicacoesTab({ indicacoes, clientes, onSave, onDelete }) {
   return (
     <div>
       <SectionTitle>Indicacoes</SectionTitle>
+
+      <RankingIndicacoes indicacoes={indicacoes} clientes={clientes} />
 
       <NovaIndicacaoForm clientes={clientes} onSave={onSave} />
 
@@ -2815,6 +2970,182 @@ function IndicacoesTab({ indicacoes, clientes, onSave, onDelete }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Perfil do Criador (Fase 8C)
+// ---------------------------------------------------------------------------
+
+const UF_LISTA = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
+
+function PerfilTab({ perfil, onSave }) {
+  const [form, setForm] = useState(perfil);
+  const [salvo, setSalvo] = useState(false);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  function submit() {
+    onSave(form);
+    setSalvo(true);
+    setTimeout(() => setSalvo(false), 2500);
+  }
+
+  return (
+    <div className="max-w-xl">
+      <SectionTitle>Perfil do Criador</SectionTitle>
+      <p className="ui-sans text-sm mb-5" style={{ color: "#F1E6D2" }}>
+        Essas informacoes aparecem publicamente em todos os seus anuncios, pra quem se interessar saber quem e voce e como falar com voce.
+      </p>
+      <Card className="p-4 sm:p-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <Field label="Nome do criatorio"><input style={inputStyle} value={form.nomeCriatorio} onChange={set("nomeCriatorio")} placeholder="ex: Criatorio Dantas" /></Field>
+          <Field label="WhatsApp de contato"><input style={inputStyle} value={form.whatsapp} onChange={set("whatsapp")} placeholder="ex: (11) 99999-9999" /></Field>
+          <Field label="Cidade"><input style={inputStyle} value={form.cidade} onChange={set("cidade")} placeholder="ex: Barueri" /></Field>
+          <Field label="UF">
+            <select style={inputStyle} value={form.uf} onChange={set("uf")}>
+              <option value="">--</option>
+              {UF_LISTA.map((u) => <option key={u}>{u}</option>)}
+            </select>
+          </Field>
+        </div>
+        {form.synced === false && <div className="ui-sans text-xs mb-3" style={{ color: "#a6402b" }}>Salvando no banco...</div>}
+        {salvo && <div className="ui-sans text-sm mb-3 px-3 py-2 rounded-lg" style={{ background: "#e4ead9", color: "#556b3f" }}>Perfil salvo.</div>}
+        <button onClick={submit} className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: "#C69A2E", color: "#2B1D14" }}>
+          <Save size={15} /> Salvar perfil
+        </button>
+      </Card>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Anuncios (Fase 8C)
+// ---------------------------------------------------------------------------
+
+function NovoAnuncioForm({ ave, onSave, onCancel }) {
+  const [form, setForm] = useState({
+    ...emptyAnuncio(),
+    aveId: ave.id,
+    nomeAve: ave.nome,
+    especie: ave.especie,
+    corMutacao: ave.corMutacao,
+    sexo: ave.sexo,
+    nascimento: ave.nascimento,
+    foto: ave.foto,
+  });
+  const [error, setError] = useState("");
+
+  function submit() {
+    const result = onSave(form);
+    if (!result?.ok) setError(result?.error || "Nao consegui salvar.");
+  }
+
+  return (
+    <Card className="p-4 mb-3">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
+          {ave.foto ? <img src={ave.foto} className="w-full h-full object-cover" alt="" /> : null}
+        </div>
+        <div className="ui-sans font-semibold text-sm" style={{ color: "#2B241C" }}>{ave.nome}</div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+        <Field label="Preco (R$)">
+          <input style={inputStyle} type="number" step="0.01" value={form.preco} onChange={(e) => setForm((f) => ({ ...f, preco: e.target.value }))} />
+        </Field>
+        <Field label="Descricao">
+          <input style={inputStyle} value={form.descricao} onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))} placeholder="ex: dócil, já desmamado" />
+        </Field>
+      </div>
+      {error && <div className="ui-sans text-sm mb-3 px-3 py-2 rounded-lg" style={{ background: "#f0dad4", color: "#a6402b" }}>{error}</div>}
+      <div className="flex gap-2">
+        <button onClick={submit} className="ui-sans text-sm px-4 py-2 rounded-lg font-semibold" style={{ background: "#C69A2E", color: "#2B1D14" }}>Publicar anuncio</button>
+        <button onClick={onCancel} className="ui-sans text-sm px-4 py-2 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>Cancelar</button>
+      </div>
+    </Card>
+  );
+}
+
+function AnuncioCard({ anuncio, onToggleAtivo, onDelete }) {
+  return (
+    <Card className="p-3 flex items-center gap-3 ui-sans">
+      <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
+        {anuncio.foto ? <img src={anuncio.foto} className="w-full h-full object-cover" alt="" /> : null}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{anuncio.nomeAve}</div>
+        <div className="text-xs" style={{ color: "#8a7a63" }}>{anuncio.especie} - {anuncio.corMutacao || "sem mutacao"}</div>
+        <div className="text-sm font-semibold" style={{ color: "#556b3f" }}>{money(anuncio.preco)}</div>
+      </div>
+      <div className="flex flex-col items-end gap-2 shrink-0">
+        <span className="text-[10px] px-2 py-1 rounded ui-mono" style={{ background: anuncio.ativo ? "#c8dcb8" : "#e3d3b4", color: "#2B241C" }}>
+          {anuncio.ativo ? "NO AR" : "PAUSADO"}
+        </span>
+        <div className="flex gap-1">
+          <button onClick={() => onToggleAtivo(anuncio)} className="text-xs px-2 py-1 rounded" style={{ background: "#e3d3b4", color: "#2B241C" }}>
+            {anuncio.ativo ? "Pausar" : "Reativar"}
+          </button>
+          <button onClick={() => onDelete(anuncio.id)} className="text-xs px-2 py-1 rounded" style={{ background: "#f0dad4", color: "#a6402b" }}><Trash2 size={12} /></button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function AnunciosTab({ aves, anuncios, perfil, onSave, onToggleAtivo, onDelete, setTab }) {
+  const [criandoParaId, setCriandoParaId] = useState(null);
+
+  const avesAnunciaveis = aves.filter((a) => a.status === "A venda" && !anuncios.some((an) => an.aveId === a.id));
+  const perfilIncompleto = !perfil.whatsapp?.trim();
+
+  return (
+    <div>
+      <SectionTitle>Anuncios</SectionTitle>
+
+      {perfilIncompleto && (
+        <div className="ui-sans mb-4 px-4 py-3 rounded-lg text-sm flex items-center justify-between gap-3" style={{ background: "#f5e9c8", color: "#8a6f2e", border: "1px solid #d6c39a" }}>
+          <span>Preenche seu WhatsApp no Perfil do Criador antes de publicar, pra quem se interessar saber como falar com voce.</span>
+          <button onClick={() => setTab("perfil")} className="ui-sans px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0" style={{ background: "#2B1D14", color: "#F1E6D2" }}>Ir pro Perfil</button>
+        </div>
+      )}
+
+      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>AVES DISPONIVEIS PRA ANUNCIAR</div>
+      {avesAnunciaveis.length === 0 ? (
+        <Card className="p-4 mb-6 ui-sans text-sm" style={{ color: "#8a7a63" }}>
+          Nenhuma ave nova pra anunciar (marca uma ave como "A venda" no cadastro pra ela aparecer aqui).
+        </Card>
+      ) : (
+        <div className="grid gap-2 mb-6" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+          {avesAnunciaveis.map((a) =>
+            criandoParaId === a.id ? (
+              <div key={a.id} className="sm:col-span-2">
+                <NovoAnuncioForm ave={a} onSave={(form) => { const r = onSave(form); if (r?.ok) setCriandoParaId(null); return r; }} onCancel={() => setCriandoParaId(null)} />
+              </div>
+            ) : (
+              <Card key={a.id} className="p-3 flex items-center gap-3 ui-sans">
+                <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
+                  {a.foto ? <img src={a.foto} className="w-full h-full object-cover" alt="" /> : null}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{a.nome}</div>
+                  <div className="text-xs" style={{ color: "#8a7a63" }}>{a.especie}</div>
+                </div>
+                <button onClick={() => setCriandoParaId(a.id)} className="text-xs px-2 py-1 rounded font-semibold" style={{ background: "#C69A2E", color: "#2B1D14" }}>Anunciar</button>
+              </Card>
+            )
+          )}
+        </div>
+      )}
+
+      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>MEUS ANUNCIOS ({anuncios.length})</div>
+      {anuncios.length === 0 ? (
+        <Card className="p-6 text-center ui-sans" style={{ color: "#8a7a63" }}>Nenhum anuncio publicado ainda.</Card>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {anuncios.map((an) => <AnuncioCard key={an.id} anuncio={an} onToggleAtivo={onToggleAtivo} onDelete={onDelete} />)}
+        </div>
+      )}
     </div>
   );
 }
