@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Bird, Plus, Search, GitBranch, Tag, Upload, Trash2, X, Loader2, Save,
-  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil, ClipboardCheck, Truck, MessageCircle, Handshake, Megaphone, UserCircle,
+  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil, ClipboardCheck, Truck, MessageCircle, Handshake, Megaphone, UserCircle, ShieldCheck, Check,
 } from "lucide-react";
+
 import { supabase } from "./supabaseClient";
-import { listRows, saveRow, deleteRow, uid, getPerfil, savePerfil, listAnuncios, saveAnuncio, deleteAnuncio } from "./lib/db";
+
+import {
+  listRows, saveRow, deleteRow, uid, getPerfil, savePerfil, listAnuncios, saveAnuncio, deleteAnuncio,
+  checkIsAdmin, listTodosAnunciosParaAdmin, updateAnuncioStatus, listPerfisPublicos,
+} from "./lib/db";
+
 import AuthPage from "./components/AuthPage";
 
 // ---------------------------------------------------------------------------
@@ -42,6 +48,7 @@ function emptyAve() {
     especie: "Ring Neck",
     sexo: "Indefinido",
     corMutacao: "",
+    portadores: [],
     corAnilha: "",
     anilha: "",
     nascimento: "",
@@ -517,6 +524,9 @@ function AppInner({ user, onLogout }) {
   const [indicacoes, setIndicacoes] = useState([]);
   const [anuncios, setAnuncios] = useState([]);
   const [perfil, setPerfil] = useState(emptyPerfilCriador());
+  const [isAdminUser, setIsAdminUser] = useState(false);
+  const [anunciosAprovacao, setAnunciosAprovacao] = useState([]);
+  const [perfisPublicos, setPerfisPublicos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
@@ -597,7 +607,7 @@ function AppInner({ user, onLogout }) {
     }
   }, [user.id]);
 
-  const loadPerfil = useCallback(async () => {
+    const loadPerfil = useCallback(async () => {
     try {
       const p = await getPerfil(user.id);
       if (p) setPerfil({ ...emptyPerfilCriador(), ...p, synced: true });
@@ -606,6 +616,26 @@ function AppInner({ user, onLogout }) {
     }
   }, [user.id]);
 
+  const loadAdminStatus = useCallback(async () => {
+    try {
+      const admin = await checkIsAdmin(user.id);
+      setIsAdminUser(admin);
+
+      if (admin) {
+        const [todos, perfis] = await Promise.all([
+          listTodosAnunciosParaAdmin(),
+          listPerfisPublicos(),
+        ]);
+
+        setAnunciosAprovacao(todos);
+        setPerfisPublicos(perfis);
+      }
+    } catch {
+      // silencioso - se a tabela 'admins' ainda nao existir, so nao mostra o painel
+    }
+  }, [user.id]);
+
+   
   useEffect(() => {
     loadAves();
     loadDespesas();
@@ -615,7 +645,8 @@ function AppInner({ user, onLogout }) {
     loadIndicacoes();
     loadAnuncios();
     loadPerfil();
-  }, [loadAves, loadDespesas, loadMutacoes, loadClientes, loadFornecedores, loadIndicacoes, loadAnuncios, loadPerfil]);
+    loadAdminStatus();
+  }, [loadAves, loadDespesas, loadMutacoes, loadClientes, loadFornecedores, loadIndicacoes, loadAnuncios, loadPerfil, loadAdminStatus]);
 
   function startNew() {
     setForm(emptyAve());
@@ -931,15 +962,17 @@ function AppInner({ user, onLogout }) {
     }
   }
 
-  function handleSaveAnuncio(anuncio) {
-    if (!anuncio.aveId) return { ok: false, error: "Selecione a ave pra anunciar." };
-    if (!anuncio.preco) return { ok: false, error: "Informe o preco do anuncio." };
-    const id = anuncio.id || uid();
-    const toSave = { ...anuncio, id, criadoEm: anuncio.criadoEm || new Date().toISOString() };
-    setAnuncios((prev) => {
-      const others = prev.filter((a) => a.id !== id);
-      return [...others, { ...toSave, synced: false }];
-    });
+ function handleSaveAnuncio(anuncio) {
+  if (!anuncio.aveId) return { ok: false, error: "Selecione a ave pra anunciar." };
+  if (!anuncio.preco) return { ok: false, error: "Informe o preco do anuncio." };
+  const id = anuncio.id || uid();
+  const ehNovo = !anuncio.id;
+  const toSave = { ...anuncio, id, criadoEm: anuncio.criadoEm || new Date().toISOString() };
+  setAnuncios((prev) => {
+    const others = prev.filter((a) => a.id !== id);
+    // anuncio novo sempre comeca "pendente" (so entra no ar depois de aprovado)
+    return [...others, { ...toSave, status: ehNovo ? "pendente" : toSave.status, synced: false }];
+  });
     saveAnuncio(user.id, toSave)
       .then(() => setAnuncios((prev) => prev.map((a) => (a.id === id ? { ...a, synced: true } : a))))
       .catch((e) => setError(
@@ -947,7 +980,7 @@ function AppInner({ user, onLogout }) {
         "Se as tabelas 'anuncios'/'perfil_criador' ainda nao existem no seu Supabase, roda o schema_fase_anuncios.sql no SQL Editor."
       ));
     return { ok: true };
-  }
+    }
 
   function handleToggleAnuncioAtivo(anuncio) {
     handleSaveAnuncio({ ...anuncio, ativo: !anuncio.ativo });
@@ -970,6 +1003,15 @@ function AppInner({ user, onLogout }) {
         `Perfil ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}). ` +
         "Se a tabela 'perfil_criador' ainda nao existe no seu Supabase, roda o schema_fase_anuncios.sql no SQL Editor."
       ));
+  }
+
+  async function handleModerarAnuncio(id, novoStatus) {
+    setAnunciosAprovacao((prev) => prev.map((a) => (a.id === id ? { ...a, status: novoStatus } : a)));
+    try {
+      await updateAnuncioStatus(id, novoStatus);
+    } catch (e) {
+      setError(`Nao consegui atualizar o status desse anuncio (${e?.message || "erro desconhecido"}).`);
+    }
   }
 
   useEffect(() => {
@@ -1101,6 +1143,9 @@ function AppInner({ user, onLogout }) {
             { id: "indicacoes", label: "Indicacoes", icon: Handshake },
             { id: "anuncios", label: "Anuncios", icon: Megaphone },
             { id: "perfil", label: "Perfil", icon: UserCircle },
+            ...(isAdminUser ? [{ id: "aprovacoes", label: "Aprovacoes", icon: ShieldCheck }] : []),
+
+
             { id: "mutacoes", label: "Genetica", icon: Dna },
           ].map(({ id, label: lbl, icon: Icon }) => (
             <button
@@ -1177,7 +1222,17 @@ function AppInner({ user, onLogout }) {
             )}
 
             {tab === "mutacoes" && (
-              <MutacoesTab mutacoes={mutacoes} onSave={handleSaveMutacao} onDelete={handleDeleteMutacao} />
+  <>
+              <CalculadoraGenetica aves={aves} mutacoes={mutacoes} />
+
+              <div className="my-8 h-px" style={{ background: "#e3d3b4" }} />
+
+              <MutacoesTab
+              mutacoes={mutacoes}
+            onSave={handleSaveMutacao}
+      onDelete={handleDeleteMutacao}
+    />
+  </>
             )}
 
             {tab === "clientes" && (
@@ -1206,6 +1261,11 @@ function AppInner({ user, onLogout }) {
 
             {tab === "perfil" && (
               <PerfilTab perfil={perfil} onSave={handleSavePerfil} />
+            )}
+
+
+            {tab === "aprovacoes" && isAdminUser && (
+              <AprovacoesTab anuncios={anunciosAprovacao} perfis={perfisPublicos} onModerar={handleModerarAnuncio} />
             )}
           </>
         )}
@@ -1657,11 +1717,78 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
               <select style={inputStyle} value={form.sexo} onChange={set("sexo")}>{SEXOS.map((s) => <option key={s}>{s}</option>)}</select>
             </Field>
             <Field label="Mutacao / Cor">
-              <input style={inputStyle} list="lista-mutacoes" value={form.corMutacao} onChange={set("corMutacao")} placeholder="ex: Cremina" />
-              <datalist id="lista-mutacoes">
-                {mutacoes.map((m) => <option key={m.id} value={m.nome} />)}
-              </datalist>
-            </Field>
+  <select
+    style={inputStyle}
+    value={form.corMutacao}
+    onChange={set("corMutacao")}
+  >
+    <option value="">-- selecione --</option>
+    {form.corMutacao && !mutacoes.some((m) => m.nome === form.corMutacao) && (
+      <option value={form.corMutacao}>{form.corMutacao} (nao cadastrada no Banco de Genetica)</option>
+    )}
+    {mutacoes.map((m) => (
+      <option key={m.id} value={m.nome}>{m.nome}</option>
+    ))}
+  </select>
+  {mutacoes.length === 0 && (
+    <div className="ui-sans text-xs mt-1" style={{ color: "#8a7a63" }}>
+      Nenhuma mutacao cadastrada ainda — cadastre em Genetica &gt; Mutacoes primeiro.
+    </div>
+  )}
+</Field>
+
+<Field label="Portador de">
+  <div
+    className="rounded-xl p-3"
+    style={{
+      background: "#fffaf0",
+      border: "1px solid #d8c6a5",
+    }}
+  >
+    {mutacoes.length === 0 ? (
+      <div className="text-sm" style={{ color: "#8a7a63" }}>
+        Nenhuma mutacao cadastrada.
+      </div>
+    ) : (
+      <div className="space-y-2">
+        {mutacoes.map((mutacao) => {
+          const selecionado = (form.portadores || []).includes(mutacao.nome);
+
+          return (
+            <label
+              key={mutacao.id}
+              className="flex items-center gap-2 text-sm cursor-pointer"
+              style={{ color: "#4f4336" }}
+            >
+              <input
+                type="checkbox"
+                checked={selecionado}
+                onChange={(e) => {
+                  const atuais = form.portadores || [];
+
+                  const novos = e.target.checked
+                    ? [...new Set([...atuais, mutacao.nome])]
+                    : atuais.filter((nome) => nome !== mutacao.nome);
+
+                  setForm({
+                    ...form,
+                    portadores: novos,
+                  });
+                }}
+              />
+
+              <span>{mutacao.nome}</span>
+            </label>
+          );
+        })}
+      </div>
+    )}
+  </div>
+
+  <p className="text-xs mt-2" style={{ color: "#8a7a63" }}>
+    Marque as mutacoes que a ave carrega sem apresentar visualmente.
+  </p>
+</Field>
           </div>
         </div>
 
@@ -2074,6 +2201,336 @@ function FinanceiroTab({ aves, despesas, onSaveDespesa, onDeleteDespesa }) {
 // Banco de Genetica
 // ---------------------------------------------------------------------------
 
+function CalculadoraGenetica({ aves, mutacoes }) {
+  const [paiId, setPaiId] = useState("");
+  const [maeId, setMaeId] = useState("");
+  const [resultado, setResultado] = useState(null);
+
+  const machos = aves.filter((a) => a.sexo === "Macho");
+  const femeas = aves.filter((a) => a.sexo === "Femea");
+
+  const pai = aves.find((a) => a.id === paiId);
+  const mae = aves.find((a) => a.id === maeId);
+
+  function calcular() {
+    if (!pai || !mae) {
+      setResultado({
+        tipo: "erro",
+        mensagem: "Selecione o pai e a mae para calcular.",
+      });
+      return;
+    }
+
+    const normalizar = (valor) =>
+      (valor || "").trim().toLowerCase();
+
+    function obterGenotipoAzul(ave) {
+      const mutacao = normalizar(ave.corMutacao);
+      const portadores = (ave.portadores || []).map(normalizar);
+
+      if (mutacao === "azul") {
+        return "bb";
+      }
+
+      if (portadores.includes("azul")) {
+        return "Bb";
+      }
+
+      return "BB";
+    }
+
+    const genotipoPai = obterGenotipoAzul(pai);
+    const genotipoMae = obterGenotipoAzul(mae);
+
+    const alelosPai = genotipoPai.split("");
+    const alelosMae = genotipoMae.split("");
+
+    const combinacoes = [];
+
+    alelosPai.forEach((aleloPai) => {
+      alelosMae.forEach((aleloMae) => {
+        const genes = [aleloPai, aleloMae]
+          .sort()
+          .join("");
+
+        combinacoes.push(genes);
+      });
+    });
+
+    const quantidade = {
+      BB: 0,
+      Bb: 0,
+      bb: 0,
+    };
+
+    combinacoes.forEach((genes) => {
+      if (genes === "BB") {
+        quantidade.BB++;
+      } else if (genes === "Bb" || genes === "bB") {
+        quantidade.Bb++;
+      } else if (genes === "bb") {
+        quantidade.bb++;
+      }
+    });
+
+    const total = combinacoes.length;
+
+    const percentualBB = (quantidade.BB / total) * 100;
+    const percentualBb = (quantidade.Bb / total) * 100;
+    const percentualAzul = (quantidade.bb / total) * 100;
+
+    const possibilidades = [];
+
+    if (percentualBB > 0) {
+      possibilidades.push({
+        nome: "Verde",
+        percentual: `${percentualBB}%`,
+        detalhe: "sem azul registrado",
+      });
+    }
+
+    if (percentualBb > 0) {
+      possibilidades.push({
+        nome: "Verde",
+        percentual: `${percentualBb}%`,
+        detalhe: "portador de Azul",
+      });
+    }
+
+    if (percentualAzul > 0) {
+      possibilidades.push({
+        nome: "Azul",
+        percentual: `${percentualAzul}%`,
+        detalhe: "visual",
+      });
+    }
+
+    setResultado({
+      tipo: "sucesso",
+      titulo: "Resultado do cruzamento",
+      cruzamento: `${pai.corMutacao || "Sem mutacao"} x ${
+        mae.corMutacao || "Sem mutacao"
+      }`,
+      genotipos: `${genotipoPai} x ${genotipoMae}`,
+      possibilidades,
+      observacao:
+        "O calculo considera o locus Azul e os portadores de Azul registrados no cadastro das aves.",
+    });
+  }
+
+  return (
+    <div className="space-y-6">
+      <div
+        className="rounded-2xl p-5"
+        style={{
+          background: "#FAF3E6",
+          border: "1px solid #e3d3b4",
+        }}
+      >
+        <div className="ui-mono text-xs mb-2" style={{ color: "#8a7a63" }}>
+          CALCULADORA GENETICA
+        </div>
+
+        <h2
+          className="text-2xl font-semibold mb-2"
+          style={{ color: "#2B241C" }}
+        >
+          Cruzamento de Ring Neck
+        </h2>
+
+        <p className="text-sm" style={{ color: "#6f6254" }}>
+          Selecione o pai e a mae cadastrados para calcular as possibilidades
+          conhecidas.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div
+          className="rounded-2xl p-5"
+          style={{
+            background: "#FAF3E6",
+            border: "1px solid #e3d3b4",
+          }}
+        >
+          <div className="ui-mono text-xs mb-3" style={{ color: "#8a7a63" }}>
+            PAI
+          </div>
+
+          <select
+            className="w-full rounded-xl px-3 py-3"
+            style={{
+              border: "1px solid #d8c6a5",
+              background: "#fffaf0",
+              color: "#2B241C",
+            }}
+            value={paiId}
+            onChange={(e) => {
+              setPaiId(e.target.value);
+              setResultado(null);
+            }}
+          >
+            <option value="">-- selecione o pai --</option>
+
+            {machos.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.nome} - {a.corMutacao || "Sem mutacao"}
+              </option>
+            ))}
+          </select>
+
+          {pai && (
+            <div className="mt-4 text-sm" style={{ color: "#5e5143" }}>
+              <strong>{pai.nome}</strong>
+              <br />
+              Mutacao: {pai.corMutacao || "Nao informada"}
+              <br />
+              Portador de:{" "}
+              {(pai.portadores || []).length > 0
+                ? pai.portadores.join(", ")
+                : "Nenhuma informada"}
+            </div>
+          )}
+        </div>
+
+        <div
+          className="rounded-2xl p-5"
+          style={{
+            background: "#FAF3E6",
+            border: "1px solid #e3d3b4",
+          }}
+        >
+          <div className="ui-mono text-xs mb-3" style={{ color: "#8a7a63" }}>
+            MAE
+          </div>
+
+          <select
+            className="w-full rounded-xl px-3 py-3"
+            style={{
+              border: "1px solid #d8c6a5",
+              background: "#fffaf0",
+              color: "#2B241C",
+            }}
+            value={maeId}
+            onChange={(e) => {
+              setMaeId(e.target.value);
+              setResultado(null);
+            }}
+          >
+            <option value="">-- selecione a mae --</option>
+
+            {femeas.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.nome} - {a.corMutacao || "Sem mutacao"}
+              </option>
+            ))}
+          </select>
+
+          {mae && (
+            <div className="mt-4 text-sm" style={{ color: "#5e5143" }}>
+              <strong>{mae.nome}</strong>
+              <br />
+              Mutacao: {mae.corMutacao || "Nao informada"}
+              <br />
+              Portador de:{" "}
+              {(mae.portadores || []).length > 0
+                ? mae.portadores.join(", ")
+                : "Nenhuma informada"}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <button
+        onClick={calcular}
+        className="px-5 py-3 rounded-xl font-semibold"
+        style={{
+          background: "#C69A2E",
+          color: "#2B241C",
+        }}
+      >
+        Calcular cruzamento
+      </button>
+
+      {resultado && (
+        <div
+          className="rounded-2xl p-5"
+          style={{
+            background: "#FAF3E6",
+            border: "1px solid #e3d3b4",
+          }}
+        >
+          {resultado.tipo === "erro" && (
+            <div style={{ color: "#A6402B" }}>
+              {resultado.mensagem}
+            </div>
+          )}
+
+          {resultado.tipo === "sucesso" && (
+            <>
+              <div
+                className="ui-mono text-xs mb-2"
+                style={{ color: "#8a7a63" }}
+              >
+                {resultado.titulo}
+              </div>
+
+              <div
+                className="text-xl font-semibold"
+                style={{ color: "#2B241C" }}
+              >
+                {resultado.cruzamento}
+              </div>
+
+              <div
+                className="mt-2 text-sm"
+                style={{ color: "#8a7a63" }}
+              >
+                Genotipo considerado: {resultado.genotipos}
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {resultado.possibilidades.map((item, index) => (
+                  <div
+                    key={`${item.nome}-${item.detalhe}-${index}`}
+                    className="flex items-center justify-between rounded-xl px-4 py-3"
+                    style={{
+                      background: "#f2e8d4",
+                      border: "1px solid #dfcba7",
+                    }}
+                  >
+                    <div>
+                      <div className="font-semibold">
+                        {item.nome}
+                      </div>
+
+                      <div
+                        className="text-xs mt-1"
+                        style={{ color: "#8a7a63" }}
+                      >
+                        {item.detalhe}
+                      </div>
+                    </div>
+
+                    <span className="font-semibold">
+                      {item.percentual}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <p
+                className="mt-4 text-sm"
+                style={{ color: "#6f6254" }}
+              >
+                {resultado.observacao}
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 function MutacoesTab({ mutacoes, onSave, onDelete }) {
   const [nova, setNova] = useState(emptyMutacao());
   const [editId, setEditId] = useState(null);
@@ -3067,7 +3524,12 @@ function NovoAnuncioForm({ ave, onSave, onCancel }) {
   );
 }
 
-function AnuncioCard({ anuncio, onToggleAtivo, onDelete }) {
+
+       const STATUS_ANUNCIO_TONS = { pendente: "#f0dab0", aprovado: "#c8dcb8", rejeitado: "#f0c9c0" };
+       const STATUS_ANUNCIO_LABEL = { pendente: "EM ANALISE", aprovado: "APROVADO", rejeitado: "REJEITADO" };
+
+ function AnuncioCard({ anuncio, onToggleAtivo, onDelete }) {
+       const status = anuncio.status || "pendente";
   return (
     <Card className="p-3 flex items-center gap-3 ui-sans">
       <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
@@ -3079,6 +3541,9 @@ function AnuncioCard({ anuncio, onToggleAtivo, onDelete }) {
         <div className="text-sm font-semibold" style={{ color: "#556b3f" }}>{money(anuncio.preco)}</div>
       </div>
       <div className="flex flex-col items-end gap-2 shrink-0">
+        <span className="text-[10px] px-2 py-1 rounded ui-mono" style={{ background: STATUS_ANUNCIO_TONS[status], color: "#2B241C" }}>
+          {STATUS_ANUNCIO_LABEL[status]}
+        </span>
         <span className="text-[10px] px-2 py-1 rounded ui-mono" style={{ background: anuncio.ativo ? "#c8dcb8" : "#e3d3b4", color: "#2B241C" }}>
           {anuncio.ativo ? "NO AR" : "PAUSADO"}
         </span>
@@ -3144,6 +3609,87 @@ function AnunciosTab({ aves, anuncios, perfil, onSave, onToggleAtivo, onDelete, 
       ) : (
         <div className="flex flex-col gap-2">
           {anuncios.map((an) => <AnuncioCard key={an.id} anuncio={an} onToggleAtivo={onToggleAtivo} onDelete={onDelete} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Aprovacoes (Fase 8D) - so visivel/carregado pra quem esta na tabela admins
+// ---------------------------------------------------------------------------
+
+function AprovacaoCard({ anuncio, criador, onModerar }) {
+  return (
+    <Card className="p-4 ui-sans">
+      <div className="flex items-start gap-3 mb-3">
+        <div className="w-16 h-16 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
+          {anuncio.foto ? <img src={anuncio.foto} className="w-full h-full object-cover" alt="" /> : null}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold text-sm" style={{ color: "#2B241C" }}>{anuncio.nomeAve}</div>
+          <div className="text-xs" style={{ color: "#8a7a63" }}>{anuncio.especie} - {anuncio.corMutacao || "sem mutacao"} - {anuncio.sexo}</div>
+          <div className="text-sm font-semibold" style={{ color: "#556b3f" }}>{money(anuncio.preco)}</div>
+          {anuncio.descricao && <div className="text-xs italic mt-1" style={{ color: "#7a6a52" }}>{anuncio.descricao}</div>}
+        </div>
+      </div>
+      <div className="text-xs mb-3 ui-mono" style={{ color: "#8a7a63" }}>
+        Criador: {criador?.nomeCriatorio || "(perfil nao preenchido)"} {criador?.whatsapp ? `- ${criador.whatsapp}` : ""} {criador?.cidade ? `- ${criador.cidade}/${criador.uf || ""}` : ""}
+      </div>
+      {anuncio.status === "pendente" ? (
+        <div className="flex gap-2">
+          <button onClick={() => onModerar(anuncio.id, "aprovado")} className="ui-sans text-xs px-3 py-2 rounded-lg font-semibold flex items-center gap-1" style={{ background: "#556b3f", color: "#F1E6D2" }}>
+            <Check size={13} /> Aprovar
+          </button>
+          <button onClick={() => onModerar(anuncio.id, "rejeitado")} className="ui-sans text-xs px-3 py-2 rounded-lg font-semibold" style={{ background: "#f0dad4", color: "#a6402b" }}>
+            Rejeitar
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] px-2 py-1 rounded ui-mono" style={{ background: STATUS_ANUNCIO_TONS[anuncio.status], color: "#2B241C" }}>
+            {STATUS_ANUNCIO_LABEL[anuncio.status]}
+          </span>
+          <button onClick={() => onModerar(anuncio.id, "pendente")} className="text-xs underline" style={{ color: "#8a7a63" }}>Voltar pra analise</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AprovacoesTab({ anuncios, perfis, onModerar }) {
+  const [filtro, setFiltro] = useState("pendente");
+  const perfisPorUser = new Map(perfis.map((p) => [p.userId, p]));
+  const filtrados = anuncios.filter((a) => (a.status || "pendente") === filtro);
+
+  return (
+    <div>
+      <SectionTitle>Aprovacoes</SectionTitle>
+      <p className="ui-sans text-sm mb-5" style={{ color: "#F1E6D2" }}>
+        Painel administrativo - aqui voce ve anuncios de todos os criadores da plataforma, nao so os seus.
+      </p>
+
+      <div className="flex gap-2 mb-5">
+        {["pendente", "aprovado", "rejeitado"].map((s) => (
+          <button
+            key={s}
+            onClick={() => setFiltro(s)}
+            className="ui-sans text-xs px-3 py-1.5 rounded-lg font-semibold"
+            style={{ background: filtro === s ? "#C69A2E" : "#3a2314", color: filtro === s ? "#2B1D14" : "#b09a78" }}
+          >
+            {STATUS_ANUNCIO_LABEL[s]} ({anuncios.filter((a) => (a.status || "pendente") === s).length})
+          </button>
+        ))}
+      </div>
+
+      {filtrados.length === 0 ? (
+        <Card className="p-8 text-center ui-sans" style={{ color: "#8a7a63" }}>Nenhum anuncio nesse status.</Card>
+      ) : (
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
+          {filtrados.map((a) => (
+            <AprovacaoCard key={a.id} anuncio={a} criador={perfisPorUser.get(a.userId)} onModerar={onModerar} />
+          ))}
         </div>
       )}
     </div>
