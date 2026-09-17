@@ -1717,19 +1717,20 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
               <select style={inputStyle} value={form.sexo} onChange={set("sexo")}>{SEXOS.map((s) => <option key={s}>{s}</option>)}</select>
             </Field>
             <Field label="Mutacao / Cor">
-  <select
+  <input
     style={inputStyle}
+    list="lista-mutacoes"
     value={form.corMutacao}
     onChange={set("corMutacao")}
-  >
-    <option value="">-- selecione --</option>
-    {form.corMutacao && !mutacoes.some((m) => m.nome === form.corMutacao) && (
-      <option value={form.corMutacao}>{form.corMutacao} (nao cadastrada no Banco de Genetica)</option>
-    )}
+    placeholder="ex: Cremina"
+  />
+
+  <datalist id="lista-mutacoes">
     {mutacoes.map((m) => (
-      <option key={m.id} value={m.nome}>{m.nome}</option>
+      <option key={m.id} value={m.nome} />
     ))}
-  </select>
+  </datalist>
+
   {mutacoes.length === 0 && (
     <div className="ui-sans text-xs mt-1" style={{ color: "#8a7a63" }}>
       Nenhuma mutacao cadastrada ainda — cadastre em Genetica &gt; Mutacoes primeiro.

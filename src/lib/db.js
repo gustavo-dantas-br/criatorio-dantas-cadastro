@@ -65,3 +65,33 @@ export async function deleteAnuncio(id) {
   const { error } = await supabase.from("anuncios").delete().eq("id", id);
   if (error) throw error;
 }
+
+// ---------- Administracao (Fase 8D) ----------
+export async function checkIsAdmin(userId) {
+  const { data, error } = await supabase.from("admins").select("user_id").eq("user_id", userId).maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+// So retorna dado se o usuario logado for admin (garantido pela RLS: a
+// policy "admin ve todos os anuncios" so libera linha pra quem esta na
+// tabela admins - um usuario comum so veria os proprios, como sempre).
+export async function listTodosAnunciosParaAdmin() {
+  const { data, error } = await supabase.from("anuncios").select("id, user_id, ave_id, ativo, status, data");
+  if (error) throw error;
+  return (data || []).map((r) => ({ ...r.data, id: r.id, userId: r.user_id, aveId: r.ave_id, ativo: r.ativo, status: r.status }));
+}
+
+export async function updateAnuncioStatus(id, status) {
+  const { error } = await supabase.from("anuncios").update({ status }).eq("id", id);
+  if (error) throw error;
+}
+
+// Nomes/whatsapp dos criadores - usado no painel de aprovacao pra identificar
+// quem publicou cada anuncio. A tabela perfil_criador ja tem leitura publica.
+export async function listPerfisPublicos() {
+  const { data, error } = await supabase.from("perfil_criador").select("user_id, data");
+  if (error) throw error;
+  return (data || []).map((r) => ({ userId: r.user_id, ...r.data }));
+}
+
