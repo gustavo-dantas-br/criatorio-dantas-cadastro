@@ -9,6 +9,7 @@ import { supabase } from "./supabaseClient";
 import {
   listRows, saveRow, deleteRow, uid, getPerfil, savePerfil, listAnuncios, saveAnuncio, deleteAnuncio,
   checkIsAdmin, listTodosAnunciosParaAdmin, updateAnuncioStatus, listPerfisPublicos,
+  listPerdidas, savePerdida, deletePerdida, buscarPerdidaPorAnilha,
 } from "./lib/db";
 
 import AuthPage from "./components/AuthPage";
@@ -25,7 +26,7 @@ import AuthPage from "./components/AuthPage";
 
 const ESPECIES = ["Ring Neck", "Calopsita", "Outra"];
 const SEXOS = ["Macho", "Femea", "Indefinido"];
-const STATUS_AVE = ["No plantel", "A venda", "Reservada", "Vendida", "Falecida"];
+const STATUS_AVE = ["No plantel", "A venda", "Reservada", "Vendida", "Falecida", "Perdida"];
 const STATUS_PLANTEL = ["No plantel", "A venda", "Reservada"];
 const STATUS_POSVENDA = ["Venda realizada", "Entregue", "Primeiro contato", "Acompanhamento", "Cliente satisfeito"];
 const SATISFACAO_OPCOES = ["Pendente", "Sim", "Nao"];
@@ -527,6 +528,7 @@ function AppInner({ user, onLogout }) {
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [anunciosAprovacao, setAnunciosAprovacao] = useState([]);
   const [perfisPublicos, setPerfisPublicos] = useState([]);
+  const [perdidas, setPerdidas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
@@ -635,7 +637,15 @@ function AppInner({ user, onLogout }) {
     }
   }, [user.id]);
 
-   
+  const loadPerdidas = useCallback(async () => {
+    try {
+      const items = await listPerdidas(user.id);
+      setPerdidas(items.map((p) => ({ ...p, synced: true })));
+    } catch {
+      // silencioso - se a tabela ainda nao existir no banco, so fica vazio
+    }
+  }, [user.id]);
+
   useEffect(() => {
     loadAves();
     loadDespesas();
@@ -646,7 +656,8 @@ function AppInner({ user, onLogout }) {
     loadAnuncios();
     loadPerfil();
     loadAdminStatus();
-  }, [loadAves, loadDespesas, loadMutacoes, loadClientes, loadFornecedores, loadIndicacoes, loadAnuncios, loadPerfil, loadAdminStatus]);
+    loadPerdidas();
+  }, [loadAves, loadDespesas, loadMutacoes, loadClientes, loadFornecedores, loadIndicacoes, loadAnuncios, loadPerfil, loadAdminStatus, loadPerdidas]);
 
   function startNew() {
     setForm(emptyAve());
@@ -729,6 +740,29 @@ function AppInner({ user, onLogout }) {
     });
     setTab("lista");
 
+    // Cria ou atualiza o registro publico de "ave perdida" automaticamente,
+    // conforme o status mudou pra "Perdida" ou saiu dele.
+    const aveAnterior = aves.find((a) => a.id === id);
+    const eraPerdida = aveAnterior?.status === "Perdida";
+    const agoraPerdida = toSave.status === "Perdida";
+    if (agoraPerdida && !eraPerdida) {
+      const existente = perdidas.find((p) => p.aveId === id);
+      handleSavePerdida({
+        ...(existente || {}),
+        id: existente?.id,
+        aveId: id,
+        nomeAve: toSave.nome,
+        especie: toSave.especie,
+        corMutacao: toSave.corMutacao,
+        anilha: toSave.anilha,
+        foto: toSave.foto,
+        status: "perdida",
+      });
+    } else if (!agoraPerdida && eraPerdida) {
+      const existente = perdidas.find((p) => p.aveId === id);
+      if (existente) handleSavePerdida({ ...existente, status: "encontrada" });
+    }
+
     try {
       await saveRow("aves", user.id, toSave);
       setAves((prev) => prev.map((a) => (a.id === id ? { ...a, synced: true } : a)));
@@ -740,6 +774,21 @@ function AppInner({ user, onLogout }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleSavePerdida(perdida) {
+    const id = perdida.id || uid();
+    const toSave = { ...perdida, id };
+    setPerdidas((prev) => {
+      const others = prev.filter((p) => p.id !== id);
+      return [...others, { ...toSave, synced: false }];
+    });
+    savePerdida(user.id, toSave)
+      .then(() => setPerdidas((prev) => prev.map((p) => (p.id === id ? { ...p, synced: true } : p))))
+      .catch((e) => setError(
+        `Registro de ave perdida ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}). ` +
+        "Se a tabela 'perdidas' ainda nao existe no seu Supabase, roda o schema_fase_perdidas.sql no SQL Editor."
+      ));
   }
 
   async function handleSync(ave) {
@@ -1717,25 +1766,27 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
               <select style={inputStyle} value={form.sexo} onChange={set("sexo")}>{SEXOS.map((s) => <option key={s}>{s}</option>)}</select>
             </Field>
             <Field label="Mutacao / Cor">
-  <input
+  <select
     style={inputStyle}
-    list="lista-mutacoes"
     value={form.corMutacao}
     onChange={set("corMutacao")}
-    placeholder="ex: Cremina"
-  />
-
-  <datalist id="lista-mutacoes">
-    {mutacoes.map((m) => (
-      <option key={m.id} value={m.nome} />
+  >
+    <option value="">-- selecione --</option>
+    {form.corMutacao && !mutacoes.some((m) => m.nome === form.corMutacao) && (
+      <option value={form.corMutacao}>{form.corMutacao} (nao cadastrada no Banco de Genetica)</option>
+    )}
+        {mutacoes.map((m) => (
+      <option key={m.id} value={m.nome}>{m.nome}</option>
     ))}
-  </datalist>
 
-  {mutacoes.length === 0 && (
-    <div className="ui-sans text-xs mt-1" style={{ color: "#8a7a63" }}>
-      Nenhuma mutacao cadastrada ainda — cadastre em Genetica &gt; Mutacoes primeiro.
-    </div>
-  )}
+    </select>
+
+    {mutacoes.length === 0 && (
+      <div className="ui-sans text-xs mt-1" style={{ color: "#8a7a63" }}>
+        Nenhuma mutacao cadastrada ainda — cadastre em Genetica &gt; Mutacoes primeiro.
+      </div>
+    )}
+
 </Field>
 
 <Field label="Portador de">
@@ -2202,6 +2253,190 @@ function FinanceiroTab({ aves, despesas, onSaveDespesa, onDeleteDespesa }) {
 // Banco de Genetica
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Motor genetico multi-loci - usado pela CalculadoraGenetica
+// Suporta: Autossomica recessiva/dominante, Codominante, Ligada ao sexo
+// (recessiva/dominante). Assume loci independentes entre si (aproximacao
+// padrao usada em calculadoras de criadores - nao modela ligacao fisica
+// entre genes no mesmo cromossomo).
+// ---------------------------------------------------------------------------
+
+function normTxtGen(s) {
+  return (s || "").trim().toLowerCase();
+}
+
+function alelosAutossomico(ave, mutNome, dominante) {
+  const expressa = normTxtGen(ave.corMutacao) === normTxtGen(mutNome);
+  const carrega = (ave.portadores || []).some((p) => normTxtGen(p) === normTxtGen(mutNome));
+  if (dominante) return expressa ? ["M", "N"] : ["N", "N"];
+  if (expressa) return ["m", "m"];
+  if (carrega) return ["N", "m"];
+  return ["N", "N"];
+}
+
+function classificarAutossomico(par, dominante, codominante) {
+  const countMut = par.filter((a) => a === "M" || a === "m").length;
+  if (codominante) {
+    if (countMut === 2) return "visual (duplo fator)";
+    if (countMut === 1) return "visual (fator simples)";
+    return "normal";
+  }
+  if (dominante) return countMut >= 1 ? "visual" : "normal";
+  if (countMut === 2) return "visual";
+  if (countMut === 1) return "portador";
+  return "normal";
+}
+
+function alelosZ(ave, mutNome, dominante) {
+  const expressa = normTxtGen(ave.corMutacao) === normTxtGen(mutNome);
+  const carrega = (ave.portadores || []).some((p) => normTxtGen(p) === normTxtGen(mutNome));
+  const alvo = dominante ? "M" : "m";
+  if (ave.sexo === "Macho") {
+    if (expressa) return [alvo, alvo];
+    if (carrega) return [alvo, "N"];
+    return ["N", "N"];
+  }
+  // Femea e hemizigota (so um Z) - nao existe estado "portador" pra ela
+  return expressa ? [alvo] : ["N"];
+}
+
+function classificarSexLigado(sexoFilho, alelos, dominante) {
+  const alvo = dominante ? "M" : "m";
+  const countMut = alelos.filter((a) => a === alvo).length;
+  if (sexoFilho === "Macho") {
+    if (dominante) return countMut >= 1 ? "visual" : "normal";
+    if (countMut === 2) return "visual";
+    if (countMut === 1) return "portador";
+    return "normal";
+  }
+  return countMut >= 1 ? "visual" : "normal";
+}
+
+// Calcula o cruzamento considerando todos os loci relevantes (mutacoes que
+// pai OU mae expressam ou carregam), usando o tipo de heranca cadastrado
+// no Banco de Genetica pra cada uma.
+function calcularCruzamentoGenetico(pai, mae, mutacoes) {
+  const relevantes = mutacoes.filter((m) => {
+    const envolve = (ave) =>
+      normTxtGen(ave.corMutacao) === normTxtGen(m.nome) ||
+      (ave.portadores || []).some((p) => normTxtGen(p) === normTxtGen(m.nome));
+    return envolve(pai) || envolve(mae);
+  });
+
+  const naoRegistradas = [pai.corMutacao, mae.corMutacao]
+    .filter(Boolean)
+    .filter((nome, i, arr) => arr.indexOf(nome) === i)
+    .filter((nome) => !mutacoes.some((m) => normTxtGen(m.nome) === normTxtGen(nome)));
+
+  if (relevantes.length === 0) {
+    return { semLociRelevantes: true, naoRegistradas };
+  }
+
+  const autossomicos = relevantes.filter((m) =>
+    ["Autossomica recessiva", "Autossomica dominante", "Codominante"].includes(m.tipoHeranca)
+  );
+  const sexLigados = relevantes.filter((m) =>
+    ["Ligada ao sexo (recessiva)", "Ligada ao sexo (dominante)"].includes(m.tipoHeranca)
+  );
+  const naoDefinidos = relevantes
+    .filter((m) => !autossomicos.includes(m) && !sexLigados.includes(m))
+    .map((m) => m.nome);
+
+  // combinacoes: cada item = { prob, partes: [descricoes de locus], sexo }
+  let combinacoes = [{ prob: 1, partes: [], sexo: null }];
+
+  autossomicos.forEach((m) => {
+    const dominante = m.tipoHeranca === "Autossomica dominante";
+    const codominante = m.tipoHeranca === "Codominante";
+    const aPai = alelosAutossomico(pai, m.nome, dominante);
+    const aMae = alelosAutossomico(mae, m.nome, dominante);
+    const porClasse = new Map();
+    aPai.forEach((p) =>
+      aMae.forEach((mm) => {
+        const cls = classificarAutossomico([p, mm], dominante, codominante);
+        porClasse.set(cls, (porClasse.get(cls) || 0) + 0.25);
+      })
+    );
+    const novas = [];
+    combinacoes.forEach((comb) => {
+      porClasse.forEach((prob, cls) => {
+        novas.push({
+          prob: comb.prob * prob,
+          partes: cls === "normal" ? comb.partes : [...comb.partes, `${cls} ${m.nome}`],
+          sexo: comb.sexo,
+        });
+      });
+    });
+    combinacoes = novas;
+  });
+
+  const sexos = [{ sexo: "Macho", prob: 0.5 }, { sexo: "Femea", prob: 0.5 }];
+
+  if (sexLigados.length > 0) {
+    const novas = [];
+    combinacoes.forEach((comb) => {
+      sexos.forEach(({ sexo, prob: probSexo }) => {
+        let subCombos = [{ prob: 1, partes: [] }];
+        sexLigados.forEach((m) => {
+          const dominante = m.tipoHeranca === "Ligada ao sexo (dominante)";
+          const zPai = alelosZ(pai, m.nome, dominante);
+          const zMae = alelosZ(mae, m.nome, dominante);
+          const novosSub = [];
+          subCombos.forEach((sub) => {
+            zPai.forEach((pz) => {
+              const alelosFilho = sexo === "Macho" ? [pz, zMae[0]] : [pz];
+              const cls = classificarSexLigado(sexo, alelosFilho, dominante);
+              novosSub.push({
+                prob: sub.prob * 0.5,
+                partes: cls === "normal" ? sub.partes : [...sub.partes, `${cls} ${m.nome}`],
+              });
+            });
+          });
+          subCombos = novosSub;
+        });
+        subCombos.forEach((sub) => {
+          novas.push({
+            prob: comb.prob * probSexo * sub.prob,
+            partes: [...comb.partes, ...sub.partes],
+            sexo,
+          });
+        });
+      });
+    });
+    combinacoes = novas;
+  } else {
+    const novas = [];
+    combinacoes.forEach((comb) => {
+      sexos.forEach(({ sexo, prob }) => {
+        novas.push({ ...comb, prob: comb.prob * prob, sexo });
+      });
+    });
+    combinacoes = novas;
+  }
+
+  const agrupado = new Map();
+  combinacoes.forEach((c) => {
+    const desc = c.partes.length ? c.partes.join(", ") : "Normal (sem mutacoes visiveis conhecidas)";
+    const key = `${c.sexo}|${desc}`;
+    agrupado.set(key, (agrupado.get(key) || 0) + c.prob);
+  });
+
+  const resultadoFinal = Array.from(agrupado.entries())
+    .map(([key, prob]) => {
+      const [sexo, desc] = key.split("|");
+      return { sexo, descricao: desc, percentual: prob * 100 };
+    })
+    .sort((a, b) => b.percentual - a.percentual);
+
+  return {
+    semLociRelevantes: false,
+    naoDefinidos,
+    naoRegistradas,
+    lociConsiderados: [...autossomicos, ...sexLigados].map((m) => m.nome),
+    resultadoFinal,
+  };
+}
+
 function CalculadoraGenetica({ aves, mutacoes }) {
   const [paiId, setPaiId] = useState("");
   const [maeId, setMaeId] = useState("");
@@ -2222,100 +2457,43 @@ function CalculadoraGenetica({ aves, mutacoes }) {
       return;
     }
 
-    const normalizar = (valor) =>
-      (valor || "").trim().toLowerCase();
+    const calc = calcularCruzamentoGenetico(pai, mae, mutacoes);
 
-    function obterGenotipoAzul(ave) {
-      const mutacao = normalizar(ave.corMutacao);
-      const portadores = (ave.portadores || []).map(normalizar);
-
-      if (mutacao === "azul") {
-        return "bb";
-      }
-
-      if (portadores.includes("azul")) {
-        return "Bb";
-      }
-
-      return "BB";
+    if (calc.semLociRelevantes) {
+      setResultado({
+        tipo: "erro",
+        mensagem:
+          "Nenhuma mutacao conhecida (cadastrada no Banco de Genetica) foi encontrada nesse casal. " +
+          (calc.naoRegistradas.length
+            ? `Cadastre "${calc.naoRegistradas.join('", "')}" em Genetica > Mutacoes pra calcular.`
+            : "Cadastre as mutacoes envolvidas em Genetica > Mutacoes."),
+      });
+      return;
     }
 
-    const genotipoPai = obterGenotipoAzul(pai);
-    const genotipoMae = obterGenotipoAzul(mae);
+    const possibilidades = calc.resultadoFinal.map((r) => ({
+      nome: r.descricao,
+      percentual: `${r.percentual.toFixed(1).replace(/\.0$/, "")}%`,
+      detalhe: r.sexo,
+    }));
 
-    const alelosPai = genotipoPai.split("");
-    const alelosMae = genotipoMae.split("");
-
-    const combinacoes = [];
-
-    alelosPai.forEach((aleloPai) => {
-      alelosMae.forEach((aleloMae) => {
-        const genes = [aleloPai, aleloMae]
-          .sort()
-          .join("");
-
-        combinacoes.push(genes);
-      });
-    });
-
-    const quantidade = {
-      BB: 0,
-      Bb: 0,
-      bb: 0,
-    };
-
-    combinacoes.forEach((genes) => {
-      if (genes === "BB") {
-        quantidade.BB++;
-      } else if (genes === "Bb" || genes === "bB") {
-        quantidade.Bb++;
-      } else if (genes === "bb") {
-        quantidade.bb++;
-      }
-    });
-
-    const total = combinacoes.length;
-
-    const percentualBB = (quantidade.BB / total) * 100;
-    const percentualBb = (quantidade.Bb / total) * 100;
-    const percentualAzul = (quantidade.bb / total) * 100;
-
-    const possibilidades = [];
-
-    if (percentualBB > 0) {
-      possibilidades.push({
-        nome: "Verde",
-        percentual: `${percentualBB}%`,
-        detalhe: "sem azul registrado",
-      });
+    let observacao =
+      "Calculo considera os loci registrados no Banco de Genetica (autossomicos e ligados ao sexo), " +
+      "tratando cada mutacao como independente das demais.";
+    if (calc.naoDefinidos.length) {
+      observacao += ` As mutacoes "${calc.naoDefinidos.join('", "')}" ainda estao com tipo de heranca "Nao definido" e nao entraram no calculo.`;
     }
-
-    if (percentualBb > 0) {
-      possibilidades.push({
-        nome: "Verde",
-        percentual: `${percentualBb}%`,
-        detalhe: "portador de Azul",
-      });
-    }
-
-    if (percentualAzul > 0) {
-      possibilidades.push({
-        nome: "Azul",
-        percentual: `${percentualAzul}%`,
-        detalhe: "visual",
-      });
+    if (calc.naoRegistradas.length) {
+      observacao += ` "${calc.naoRegistradas.join('", "')}" nao esta cadastrada no Banco de Genetica e foi ignorada.`;
     }
 
     setResultado({
       tipo: "sucesso",
       titulo: "Resultado do cruzamento",
-      cruzamento: `${pai.corMutacao || "Sem mutacao"} x ${
-        mae.corMutacao || "Sem mutacao"
-      }`,
-      genotipos: `${genotipoPai} x ${genotipoMae}`,
+      cruzamento: `${pai.corMutacao || "Sem mutacao"} x ${mae.corMutacao || "Sem mutacao"}`,
+      genotipos: `Loci considerados: ${calc.lociConsiderados.join(", ") || "-"}`,
       possibilidades,
-      observacao:
-        "O calculo considera o locus Azul e os portadores de Azul registrados no cadastro das aves.",
+      observacao,
     });
   }
 

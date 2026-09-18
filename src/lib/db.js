@@ -95,3 +95,40 @@ export async function listPerfisPublicos() {
   return (data || []).map((r) => ({ userId: r.user_id, ...r.data }));
 }
 
+// ---------- Aves perdidas/encontradas (Fase 8E) ----------
+export async function listPerdidas(userId) {
+  const { data, error } = await supabase.from("perdidas").select("id, ave_id, status, data").eq("user_id", userId);
+  if (error) throw error;
+  return (data || []).map((r) => ({ ...r.data, id: r.id, aveId: r.ave_id, status: r.status }));
+}
+
+export async function savePerdida(userId, perdida) {
+  const id = perdida.id || uid();
+  const { error } = await supabase.from("perdidas").upsert({
+    id,
+    user_id: userId,
+    ave_id: perdida.aveId,
+    status: perdida.status || "perdida",
+    data: perdida,
+  });
+  if (error) throw error;
+  return id;
+}
+
+export async function deletePerdida(id) {
+  const { error } = await supabase.from("perdidas").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// Busca publica por anilha - funciona sem login, ve registros de QUALQUER
+// criador (a policy de leitura publica da tabela 'perdidas' permite isso).
+export async function buscarPerdidaPorAnilha(anilha) {
+  const termo = (anilha || "").trim();
+  if (!termo) return [];
+  const { data, error } = await supabase
+    .from("perdidas")
+    .select("id, user_id, status, data")
+    .ilike("data->>anilha", `%${termo}%`);
+  if (error) throw error;
+  return (data || []).map((r) => ({ ...r.data, id: r.id, userId: r.user_id, status: r.status }));
+}

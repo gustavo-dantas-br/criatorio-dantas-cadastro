@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { Feather, Loader2, Camera, GitBranch, DollarSign, Tag, ClipboardCheck, Handshake } from "lucide-react";
+import { Feather, Loader2, Camera, GitBranch, DollarSign, Tag, ClipboardCheck, Handshake, Search, Phone, ArrowLeft } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { buscarPerdidaPorAnilha, getPerfil } from "../lib/db";
 
 const inputStyle = { background: "#fff", border: "1px solid #e3d3b4", color: "#2B241C", borderRadius: 8, padding: "10px 12px", fontSize: 14, outline: "none", width: "100%" };
 
@@ -40,8 +41,104 @@ function Apresentacao() {
   );
 }
 
+function BuscaPerdidas({ onVoltar }) {
+  const [anilha, setAnilha] = useState("");
+  const [resultados, setResultados] = useState(null);
+  const [perfisPorUser, setPerfisPorUser] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function buscar(e) {
+    e.preventDefault();
+    if (!anilha.trim()) return;
+    setLoading(true);
+    setError("");
+    setResultados(null);
+    try {
+      const achados = await buscarPerdidaPorAnilha(anilha);
+      setResultados(achados);
+      const perfis = {};
+      await Promise.all(
+        [...new Set(achados.map((a) => a.userId))].map(async (uidUser) => {
+          try {
+            perfis[uidUser] = await getPerfil(uidUser);
+          } catch {
+            // segue sem o contato desse criador se der erro
+          }
+        })
+      );
+      setPerfisPorUser(perfis);
+    } catch (err) {
+      setError("Nao foi possivel buscar agora. Tenta de novo em instantes.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="w-full max-w-sm rounded-xl p-6 sm:p-8 ui-sans" style={{ background: "#FAF3E6", border: "1px solid #e3d3b4" }}>
+      <button onClick={onVoltar} className="flex items-center gap-1 text-xs mb-4" style={{ color: "#8a7a63" }}>
+        <ArrowLeft size={13} /> Voltar
+      </button>
+      <h2 className="font-semibold mb-2" style={{ color: "#2B241C" }}>Achou uma ave?</h2>
+      <p className="text-sm mb-4" style={{ color: "#8a7a63" }}>
+        Digite o numero da anilha pra ver se algum criador registrou essa ave como perdida.
+      </p>
+      <form onSubmit={buscar} className="flex gap-2 mb-4">
+        <input style={inputStyle} value={anilha} onChange={(e) => setAnilha(e.target.value)} placeholder="ex: FOB 0080" />
+        <button type="submit" disabled={loading} className="shrink-0 flex items-center justify-center px-3 rounded-lg" style={{ background: "#C69A2E" }}>
+          {loading ? <Loader2 className="animate-spin" size={16} color="#2B1D14" /> : <Search size={16} color="#2B1D14" />}
+        </button>
+      </form>
+
+      {error && <div className="text-sm mb-3 px-3 py-2 rounded-lg" style={{ background: "#f0dad4", color: "#a6402b" }}>{error}</div>}
+
+      {resultados !== null && (
+        resultados.length === 0 ? (
+          <div className="text-sm px-3 py-2 rounded-lg" style={{ background: "#f0e6d2", color: "#8a6f2e" }}>
+            Nenhum registro encontrado com essa anilha.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {resultados.map((r) => {
+              const perfil = perfisPorUser[r.userId];
+              return (
+                <div key={r.id} className="rounded-lg p-3" style={{ background: "#fff", border: "1px solid #e3d3b4" }}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0" style={{ background: "#3a2a1c" }}>
+                      {r.foto ? <img src={r.foto} className="w-full h-full object-cover" alt="" /> : null}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-semibold text-sm" style={{ color: "#2B241C" }}>{r.nomeAve}</div>
+                      <div className="text-xs" style={{ color: "#8a7a63" }}>{r.especie} - {r.corMutacao}</div>
+                    </div>
+                  </div>
+                  <div className="text-[10px] px-2 py-0.5 rounded ui-mono inline-block mb-2" style={{ background: r.status === "perdida" ? "#f0dab0" : "#c8dcb8", color: "#2B241C" }}>
+                    {r.status === "perdida" ? "AINDA PERDIDA" : "JA FOI ENCONTRADA"}
+                  </div>
+                  {perfil?.whatsapp && (
+                    <a
+                      href={`https://wa.me/${(perfil.whatsapp.replace(/\D/g, "").length <= 11 ? "55" : "") + perfil.whatsapp.replace(/\D/g, "")}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-sm font-semibold px-3 py-2 rounded-lg justify-center"
+                      style={{ background: "#556b3f", color: "#F1E6D2" }}
+                    >
+                      <Phone size={14} /> Falar com {perfil.nomeCriatorio || "o criador"}
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 export default function AuthPage() {
   const [mode, setMode] = useState("login");
+  const [tela, setTela] = useState("login"); // "login" | "buscaPerdidas"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -79,21 +176,29 @@ export default function AuthPage() {
 
       <Apresentacao />
 
-      <div className="w-full max-w-sm rounded-xl p-6 sm:p-8" style={{ background: "#FAF3E6", border: "1px solid #e3d3b4" }}>
-        <h2 className="text-center ui-sans font-semibold mb-6" style={{ color: "#2B241C" }}>{mode === "login" ? "Entrar na sua conta" : "Criar conta gratuita"}</h2>
-        {error && <div className="ui-sans text-sm mb-4 px-3 py-2 rounded-lg" style={{ background: "#f0dad4", color: "#a6402b" }}>{error}</div>}
-        {message && <div className="ui-sans text-sm mb-4 px-3 py-2 rounded-lg" style={{ background: "#e4ead9", color: "#556b3f" }}>{message}</div>}
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <label className="ui-sans flex flex-col gap-1.5"><span className="text-xs font-semibold uppercase" style={{ color: "#8a7a63" }}>E-mail</span><input style={inputStyle} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-          <label className="ui-sans flex flex-col gap-1.5"><span className="text-xs font-semibold uppercase" style={{ color: "#8a7a63" }}>Senha</span><input style={inputStyle} type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-          <button type="submit" disabled={loading} className="ui-sans flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold mt-1" style={{ background: "#C69A2E", color: "#2B1D14" }}>
-            {loading && <Loader2 className="animate-spin" size={16} />}{mode === "login" ? "Entrar" : "Criar conta"}
+      {tela === "buscaPerdidas" ? (
+        <BuscaPerdidas onVoltar={() => setTela("login")} />
+      ) : (
+        <div className="w-full max-w-sm rounded-xl p-6 sm:p-8" style={{ background: "#FAF3E6", border: "1px solid #e3d3b4" }}>
+          <h2 className="text-center ui-sans font-semibold mb-6" style={{ color: "#2B241C" }}>{mode === "login" ? "Entrar na sua conta" : "Criar conta gratuita"}</h2>
+          {error && <div className="ui-sans text-sm mb-4 px-3 py-2 rounded-lg" style={{ background: "#f0dad4", color: "#a6402b" }}>{error}</div>}
+          {message && <div className="ui-sans text-sm mb-4 px-3 py-2 rounded-lg" style={{ background: "#e4ead9", color: "#556b3f" }}>{message}</div>}
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <label className="ui-sans flex flex-col gap-1.5"><span className="text-xs font-semibold uppercase" style={{ color: "#8a7a63" }}>E-mail</span><input style={inputStyle} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /></label>
+            <label className="ui-sans flex flex-col gap-1.5"><span className="text-xs font-semibold uppercase" style={{ color: "#8a7a63" }}>Senha</span><input style={inputStyle} type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+            <button type="submit" disabled={loading} className="ui-sans flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold mt-1" style={{ background: "#C69A2E", color: "#2B1D14" }}>
+              {loading && <Loader2 className="animate-spin" size={16} />}{mode === "login" ? "Entrar" : "Criar conta"}
+            </button>
+          </form>
+          <button onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); setMessage(""); }} className="ui-sans text-xs mt-5 w-full text-center underline" style={{ color: "#8a7a63" }}>
+            {mode === "login" ? "Nao tem conta? Criar uma gratuita" : "Ja tem conta? Entrar"}
           </button>
-        </form>
-        <button onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); setMessage(""); }} className="ui-sans text-xs mt-5 w-full text-center underline" style={{ color: "#8a7a63" }}>
-          {mode === "login" ? "Nao tem conta? Criar uma gratuita" : "Ja tem conta? Entrar"}
-        </button>
-      </div>
+          <div className="my-4 h-px" style={{ background: "#e3d3b4" }} />
+          <button onClick={() => setTela("buscaPerdidas")} className="ui-sans text-xs w-full text-center flex items-center justify-center gap-1.5" style={{ color: "#556b3f" }}>
+            <Search size={13} /> Encontrou uma ave? Consulte aqui
+          </button>
+        </div>
+      )}
     </div>
   );
 }
