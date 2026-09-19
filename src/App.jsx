@@ -1435,8 +1435,8 @@ function DashboardTab({ aves, despesas, setTab, goToLista }) {
         <Card className="p-4 mb-6">
           <div className="ui-mono text-xs mb-2" style={{ color: "#8a7a63" }}>ALERTAS</div>
           <div className="flex flex-col gap-1 ui-sans text-sm" style={{ color: "#2B241C" }}>
-            {semSexagem > 0 && <div>ÔÜá´©Å {semSexagem} {semSexagem === 1 ? "ave esta" : "aves estao"} sem laudo de sexagem.</div>}
-            {naoSincronizadas > 0 && <div>ÔÜá´©Å {naoSincronizadas} {naoSincronizadas === 1 ? "ave nao sincronizou" : "aves nao sincronizaram"} com o banco ainda.</div>}
+            {semSexagem > 0 && <div>⚠️ {semSexagem} {semSexagem === 1 ? "ave esta" : "aves estao"} sem laudo de sexagem.</div>}
+            {naoSincronizadas > 0 && <div>⚠️ {naoSincronizadas} {naoSincronizadas === 1 ? "ave nao sincronizou" : "aves nao sincronizaram"} com o banco ainda.</div>}
           </div>
         </Card>
       )}
@@ -1607,7 +1607,7 @@ function SeletorComprador({ form, setForm, clientes }) {
           className="ui-sans text-xs px-3 py-1.5 rounded-lg font-semibold"
           style={{ background: modo === "existente" ? "#556b3f" : "#e3d3b4", color: modo === "existente" ? "#F1E6D2" : "#2B241C" }}
         >
-          ­ƒöÄ Selecionar cliente existente
+          ­🔎 Selecionar cliente existente
         </button>
         <button
           type="button"
@@ -1683,7 +1683,7 @@ function SeletorFornecedor({ form, setForm, fornecedores }) {
           className="ui-sans text-xs px-3 py-1.5 rounded-lg font-semibold"
           style={{ background: modo === "existente" ? "#556b3f" : "#e3d3b4", color: modo === "existente" ? "#F1E6D2" : "#2B241C" }}
         >
-          ­ƒöÄ Selecionar fornecedor existente
+          ­🔎 Selecionar fornecedor existente
         </button>
         <button
           type="button"
@@ -1784,7 +1784,7 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
 
     {mutacoes.length === 0 && (
       <div className="ui-sans text-xs mt-1" style={{ color: "#8a7a63" }}>
-        Nenhuma mutacao cadastrada ainda ÔÇö cadastre em Genetica &gt; Mutacoes primeiro.
+        Nenhuma mutacao cadastrada ainda — cadastre em Genetica &gt; Mutacoes primeiro.
       </div>
     )}
 
@@ -1894,7 +1894,7 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
             <SeletorFornecedor form={form} setForm={setForm} fornecedores={fornecedores} />
             {form.fornecedorId && (
               <div className="ui-sans text-xs mt-2 mb-2 px-3 py-1.5 rounded-lg inline-block" style={{ background: "#e4ead9", color: "#556b3f" }}>
-                Ô£ô Vinculado ao cadastro do fornecedor
+                ✓ Vinculado ao cadastro do fornecedor
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
@@ -1915,7 +1915,7 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
             <SeletorComprador form={form} setForm={setForm} clientes={clientes} />
             {form.clienteId && (
               <div className="ui-sans text-xs mt-2 px-3 py-1.5 rounded-lg inline-block" style={{ background: "#e4ead9", color: "#556b3f" }}>
-                Ô£ô Vinculado ao cadastro do cliente
+                ✓ Vinculado ao cadastro do cliente
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
@@ -2139,7 +2139,7 @@ function FinanceiroTab({ aves, despesas, onSaveDespesa, onDeleteDespesa }) {
       </div>
       {finPeriodo.semData > 0 && (
         <div className="ui-sans text-xs mb-8" style={{ color: "#b09a78" }}>
-          ÔÜá´©Å {finPeriodo.semData} {finPeriodo.semData === 1 ? "registro (compra/venda/despesa) esta" : "registros (compra/venda/despesa) estao"} sem data preenchida e por isso nao entram no filtro por periodo, so no saldo total.
+          ⚠️ {finPeriodo.semData} {finPeriodo.semData === 1 ? "registro (compra/venda/despesa) esta" : "registros (compra/venda/despesa) estao"} sem data preenchida e por isso nao entram no filtro por periodo, so no saldo total.
         </div>
       )}
 
@@ -2852,7 +2852,7 @@ function ClienteDetalhe({ cliente, historico, onBack, onEdit, onDelete }) {
   const primeiroNome = (cliente.nome || "").trim().split(" ")[0] || cliente.nome;
   const ultimaAve = historico.compras[0]?.nome;
   const mensagemPadrao =
-    `Oi, ${primeiroNome}! Tudo bem? ­ƒÿè\n\n` +
+    `Oi, ${primeiroNome}! Tudo bem? ­😊\n\n` +
     `Queria saber como ${ultimaAve ? `o(a) ${ultimaAve} esta` : "a ave esta"} se adaptando a nova casa.\n\n` +
     `Ficamos muito felizes em fazer parte desse momento! ­ƒÉª­ƒÆÖ\n\n` +
     `Se voce estiver satisfeito com nosso atendimento e conhecer alguem procurando uma ave, pode indicar o Criatorio Dantas. Sera um prazer atender sua indicacao!`;
@@ -2861,7 +2861,7 @@ function ClienteDetalhe({ cliente, historico, onBack, onEdit, onDelete }) {
 
   return (
     <div>
-      <button onClick={onBack} className="ui-sans text-xs mb-4 px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>ÔåÉ Voltar pra lista</button>
+      <button onClick={onBack} className="ui-sans text-xs mb-4 px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>← Voltar pra lista</button>
       <Card className="p-6 mb-6">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
@@ -2891,7 +2891,7 @@ function ClienteDetalhe({ cliente, historico, onBack, onEdit, onDelete }) {
               className="ui-sans flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold"
               style={{ background: "#C69A2E", color: "#2B1D14" }}
             >
-              ­ƒñØ Pedir indicacao
+              ­🤝 Pedir indicacao
             </button>
           </div>
         ) : (
@@ -3143,7 +3143,7 @@ function FornecedorForm({ inicial, onSave, onCancel, error }) {
 function FornecedorDetalhe({ fornecedor, historico, onBack, onEdit, onDelete }) {
   return (
     <div>
-      <button onClick={onBack} className="ui-sans text-xs mb-4 px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>ÔåÉ Voltar pra lista</button>
+      <button onClick={onBack} className="ui-sans text-xs mb-4 px-3 py-1.5 rounded-lg" style={{ background: "#e3d3b4", color: "#2B241C" }}>← Voltar pra lista</button>
       <Card className="p-6 mb-6">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
@@ -3540,7 +3540,7 @@ function metricasIndicacoes(indicacoes, clientes) {
 
 function RankingIndicacoes({ indicacoes, clientes }) {
   const m = metricasIndicacoes(indicacoes, clientes);
-  const medalhas = ["­ƒÅå", "­ƒÑê", "­ƒÑë"];
+  const medalhas = ["­🏆", "­🥈", "­🥉"];
 
   return (
     <div className="mb-6">
@@ -3558,7 +3558,7 @@ function RankingIndicacoes({ indicacoes, clientes }) {
             {m.ranking.map((r, i) => (
               <div key={r.cliente.id} className="flex items-center justify-between ui-sans text-sm">
                 <span style={{ color: "#2B241C" }}>
-                  {medalhas[i] || `${i + 1}┬║`} {r.cliente.nome}
+                  {medalhas[i] || `${i + 1}º`} {r.cliente.nome}
                 </span>
                 <span className="ui-mono" style={{ color: "#8a6f2e" }}>{r.count} {r.count === 1 ? "indicacao" : "indicacoes"}</span>
               </div>
@@ -3694,7 +3694,7 @@ function NovoAnuncioForm({ ave, onSave, onCancel }) {
           <input style={inputStyle} type="number" step="0.01" value={form.preco} onChange={(e) => setForm((f) => ({ ...f, preco: e.target.value }))} />
         </Field>
         <Field label="Descricao">
-          <input style={inputStyle} value={form.descricao} onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))} placeholder="ex: d├│cil, j├í desmamado" />
+          <input style={inputStyle} value={form.descricao} onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))} placeholder="ex: dócil, já desmamado" />
         </Field>
       </div>
       {error && <div className="ui-sans text-sm mb-3 px-3 py-2 rounded-lg" style={{ background: "#f0dad4", color: "#a6402b" }}>{error}</div>}
