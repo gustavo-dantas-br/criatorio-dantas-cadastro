@@ -43,9 +43,9 @@ export async function savePerfil(userId, perfilData) {
 
 // ---------- Anuncios (tem colunas proprias ave_id/ativo, alem do data jsonb) ----------
 export async function listAnuncios(userId) {
-  const { data, error } = await supabase.from("anuncios").select("id, ave_id, ativo, data").eq("user_id", userId);
+  const { data, error } = await supabase.from("anuncios").select("id, ave_id, ativo, status, data, visualizacoes, cliques").eq("user_id", userId);
   if (error) throw error;
-  return (data || []).map((r) => ({ ...r.data, id: r.id, aveId: r.ave_id, ativo: r.ativo }));
+  return (data || []).map((r) => ({ ...r.data, id: r.id, aveId: r.ave_id, ativo: r.ativo, status: r.status, visualizacoes: r.visualizacoes, cliques: r.cliques }));
 }
 
 export async function saveAnuncio(userId, anuncio) {
@@ -131,4 +131,48 @@ export async function buscarPerdidaPorAnilha(anilha) {
     .ilike("data->>anilha", `%${termo}%`);
   if (error) throw error;
   return (data || []).map((r) => ({ ...r.data, id: r.id, userId: r.user_id, status: r.status }));
+}
+
+// ---------- Vitrine publica de anuncios + metricas (Fase 8F) ----------
+export async function listAnunciosPublicos() {
+  const { data, error } = await supabase
+    .from("anuncios")
+    .select("id, user_id, ave_id, ativo, status, data, visualizacoes, cliques")
+    .eq("ativo", true)
+    .eq("status", "aprovado");
+  if (error) throw error;
+  return (data || []).map((r) => ({
+    ...r.data, id: r.id, userId: r.user_id, aveId: r.ave_id,
+    ativo: r.ativo, status: r.status, visualizacoes: r.visualizacoes, cliques: r.cliques,
+  }));
+}
+
+export async function incrementarVisualizacaoAnuncio(anuncioId) {
+  const { error } = await supabase.rpc("incrementar_visualizacao_anuncio", { anuncio_id: anuncioId });
+  if (error) throw error;
+}
+
+export async function incrementarCliqueAnuncio(anuncioId) {
+  const { error } = await supabase.rpc("incrementar_clique_anuncio", { anuncio_id: anuncioId });
+  if (error) throw error;
+}
+
+// ---------- Busca geral por anilha - mediada pelo admin (Fase 8F) ----------
+export async function registrarAchadoAnilha(anilha, nome, telefone, mensagem) {
+  const { error } = await supabase.rpc("registrar_achado_anilha", {
+    p_anilha: anilha, p_nome: nome, p_telefone: telefone, p_mensagem: mensagem || "",
+  });
+  if (error) throw error;
+}
+
+// So funciona se o usuario logado estiver na tabela admins (RLS garante isso)
+export async function listAchadosAnilha() {
+  const { data, error } = await supabase.from("achados_anilha").select("*").order("criado_em", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function atualizarStatusAchado(id, status) {
+  const { error } = await supabase.from("achados_anilha").update({ status }).eq("id", id);
+  if (error) throw error;
 }

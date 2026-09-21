@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Bird, Plus, Search, GitBranch, Tag, Upload, Trash2, X, Loader2, Save,
-  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil, ClipboardCheck, Truck, MessageCircle, Handshake, Megaphone, UserCircle, ShieldCheck, Check,
+  Download, Feather, DollarSign, LogOut, LayoutDashboard, Dna, Users, Phone, Pencil, ClipboardCheck, Truck, MessageCircle, Handshake, Megaphone, UserCircle, ShieldCheck, Check, Bell, Eye, MousePointerClick,
 } from "lucide-react";
 
 import { supabase } from "./supabaseClient";
@@ -10,6 +10,7 @@ import {
   listRows, saveRow, deleteRow, uid, getPerfil, savePerfil, listAnuncios, saveAnuncio, deleteAnuncio,
   checkIsAdmin, listTodosAnunciosParaAdmin, updateAnuncioStatus, listPerfisPublicos,
   listPerdidas, savePerdida, deletePerdida, buscarPerdidaPorAnilha,
+  listAchadosAnilha, atualizarStatusAchado,
 } from "./lib/db";
 
 import AuthPage from "./components/AuthPage";
@@ -529,6 +530,7 @@ function AppInner({ user, onLogout }) {
   const [isAdminUser, setIsAdminUser] = useState(false);
   const [anunciosAprovacao, setAnunciosAprovacao] = useState([]);
   const [perfisPublicos, setPerfisPublicos] = useState([]);
+  const [achados, setAchados] = useState([]);
   const [perdidas, setPerdidas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("dashboard");
@@ -625,13 +627,15 @@ function AppInner({ user, onLogout }) {
       setIsAdminUser(admin);
 
       if (admin) {
-        const [todos, perfis] = await Promise.all([
+        const [todos, perfis, achadosData] = await Promise.all([
           listTodosAnunciosParaAdmin(),
           listPerfisPublicos(),
+          listAchadosAnilha().catch(() => []),
         ]);
 
         setAnunciosAprovacao(todos);
         setPerfisPublicos(perfis);
+        setAchados(achadosData);
       }
     } catch {
       // silencioso - se a tabela 'admins' ainda nao existir, so nao mostra o painel
@@ -1064,6 +1068,15 @@ function AppInner({ user, onLogout }) {
     }
   }
 
+  async function handleAtualizarAchado(id, novoStatus) {
+    setAchados((prev) => prev.map((a) => (a.id === id ? { ...a, status: novoStatus } : a)));
+    try {
+      await atualizarStatusAchado(id, novoStatus);
+    } catch (e) {
+      setError(`Nao consegui atualizar esse achado (${e?.message || "erro desconhecido"}).`);
+    }
+  }
+
   useEffect(() => {
     if (tab !== "placa" || !placaId) return;
     const ave = aves.find((a) => a.id === placaId);
@@ -1194,6 +1207,7 @@ function AppInner({ user, onLogout }) {
             { id: "anuncios", label: "Anuncios", icon: Megaphone },
             { id: "perfil", label: "Perfil", icon: UserCircle },
             ...(isAdminUser ? [{ id: "aprovacoes", label: "Aprovacoes", icon: ShieldCheck }] : []),
+            ...(isAdminUser ? [{ id: "achados", label: "Achados", icon: Bell }] : []),
 
 
             { id: "mutacoes", label: "Genetica", icon: Dna },
@@ -1316,6 +1330,10 @@ function AppInner({ user, onLogout }) {
 
             {tab === "aprovacoes" && isAdminUser && (
               <AprovacoesTab anuncios={anunciosAprovacao} perfis={perfisPublicos} onModerar={handleModerarAnuncio} />
+            )}
+
+            {tab === "achados" && isAdminUser && (
+              <AchadosTab achados={achados} perfis={perfisPublicos} onAtualizar={handleAtualizarAchado} />
             )}
           </>
         )}
@@ -3721,6 +3739,10 @@ function NovoAnuncioForm({ ave, onSave, onCancel }) {
         <div className="font-semibold text-sm truncate" style={{ color: "#2B241C" }}>{anuncio.nomeAve}</div>
         <div className="text-xs" style={{ color: "#8a7a63" }}>{anuncio.especie} - {anuncio.corMutacao || "sem mutacao"}</div>
         <div className="text-sm font-semibold" style={{ color: "#556b3f" }}>{money(anuncio.preco)}</div>
+        <div className="flex gap-3 mt-1">
+          <span className="text-[11px] ui-mono flex items-center gap-1" style={{ color: "#8a7a63" }}><Eye size={11} /> {anuncio.visualizacoes || 0}</span>
+          <span className="text-[11px] ui-mono flex items-center gap-1" style={{ color: "#8a7a63" }}><MousePointerClick size={11} /> {anuncio.cliques || 0}</span>
+        </div>
       </div>
       <div className="flex flex-col items-end gap-2 shrink-0">
         <span className="text-[10px] px-2 py-1 rounded ui-mono" style={{ background: STATUS_ANUNCIO_TONS[status], color: "#2B241C" }}>
@@ -3871,6 +3893,88 @@ function AprovacoesTab({ anuncios, perfis, onModerar }) {
         <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
           {filtrados.map((a) => (
             <AprovacaoCard key={a.id} anuncio={a} criador={perfisPorUser.get(a.userId)} onModerar={onModerar} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const STATUS_ACHADO_LABEL = { novo: "NOVO", contatado: "CONTATADO", resolvido: "RESOLVIDO" };
+const STATUS_ACHADO_TONS = { novo: "#f0dab0", contatado: "#c9dcee", resolvido: "#c8dcb8" };
+
+function AchadoCard({ achado, criador, onAtualizar }) {
+  return (
+    <Card className="p-4 ui-sans">
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div>
+          <div className="ui-mono text-xs" style={{ color: "#8a7a63" }}>ANILHA BUSCADA</div>
+          <div className="font-semibold text-sm" style={{ color: "#2B241C" }}>{achado.anilha_buscada}</div>
+        </div>
+        <span className="text-[10px] px-2 py-1 rounded ui-mono shrink-0" style={{ background: STATUS_ACHADO_TONS[achado.status], color: "#2B241C" }}>
+          {STATUS_ACHADO_LABEL[achado.status]}
+        </span>
+      </div>
+
+      {achado.owner_user_id ? (
+        <div className="text-sm mb-2 px-3 py-2 rounded-lg" style={{ background: "#e4ead9", color: "#556b3f" }}>
+          ✓ Anilha encontrada! Ave: <strong>{achado.ave_nome}</strong><br />
+          Criador: {criador?.nomeCriatorio || "(perfil incompleto)"} {criador?.whatsapp ? `- ${criador.whatsapp}` : ""}
+        </div>
+      ) : (
+        <div className="text-sm mb-2 px-3 py-2 rounded-lg" style={{ background: "#f0dad4", color: "#a6402b" }}>
+          Anilha nao encontrada em nenhum cadastro no momento da busca.
+        </div>
+      )}
+
+      <div className="text-xs mb-1" style={{ color: "#8a7a63" }}>Quem entrou em contato:</div>
+      <div className="text-sm font-semibold" style={{ color: "#2B241C" }}>{achado.nome_encontrador}</div>
+      <div className="text-xs flex items-center gap-1 mb-2" style={{ color: "#8a7a63" }}><Phone size={11} /> {achado.telefone_encontrador}</div>
+      {achado.mensagem && <div className="text-xs italic mb-3" style={{ color: "#7a6a52" }}>"{achado.mensagem}"</div>}
+
+      <div className="flex gap-2">
+        {achado.status !== "contatado" && (
+          <button onClick={() => onAtualizar(achado.id, "contatado")} className="text-xs px-2 py-1 rounded" style={{ background: "#c9dcee", color: "#1c3a5c" }}>Marcar contatado</button>
+        )}
+        {achado.status !== "resolvido" && (
+          <button onClick={() => onAtualizar(achado.id, "resolvido")} className="text-xs px-2 py-1 rounded" style={{ background: "#c8dcb8", color: "#2B241C" }}>Marcar resolvido</button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function AchadosTab({ achados, perfis, onAtualizar }) {
+  const [filtro, setFiltro] = useState("novo");
+  const perfisPorUser = new Map(perfis.map((p) => [p.userId, p]));
+  const filtrados = achados.filter((a) => a.status === filtro);
+
+  return (
+    <div>
+      <SectionTitle>Achados por Anilha</SectionTitle>
+      <p className="ui-sans text-sm mb-5" style={{ color: "#F1E6D2" }}>
+        Pessoas que buscaram uma anilha no site publico e deixaram contato. Voce confere de qual criador e a ave e faz a ponte.
+      </p>
+
+      <div className="flex gap-2 mb-5">
+        {["novo", "contatado", "resolvido"].map((s) => (
+          <button
+            key={s}
+            onClick={() => setFiltro(s)}
+            className="ui-sans text-xs px-3 py-1.5 rounded-lg font-semibold"
+            style={{ background: filtro === s ? "#C69A2E" : "#3a2314", color: filtro === s ? "#2B1D14" : "#b09a78" }}
+          >
+            {STATUS_ACHADO_LABEL[s]} ({achados.filter((a) => a.status === s).length})
+          </button>
+        ))}
+      </div>
+
+      {filtrados.length === 0 ? (
+        <Card className="p-8 text-center ui-sans" style={{ color: "#8a7a63" }}>Nenhum registro nesse status.</Card>
+      ) : (
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
+          {filtrados.map((a) => (
+            <AchadoCard key={a.id} achado={a} criador={perfisPorUser.get(a.owner_user_id)} onAtualizar={onAtualizar} />
           ))}
         </div>
       )}
