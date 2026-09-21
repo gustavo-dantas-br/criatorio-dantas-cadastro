@@ -312,7 +312,7 @@ export default function AuthPage() {
         </div>
         <button
           onClick={() => setMostrarLogin(true)}
-          className="ui-sans text-xs px-4 py-2 rounded-lg font-semibold"
+          className="ui-sans text-sm px-5 py-3 rounded-lg font-semibold"
           style={{ background: "#3a2314", color: "#C69A2E" }}
         >
           Entrar / Criar conta
@@ -320,10 +320,71 @@ export default function AuthPage() {
       </header>
 
       {/* Hero: busca por anilha, o principal da pagina */}
-      <section className="px-5 py-10 md:py-14">
-        <BuscaAnilha />
+            {/* Hero principal */}
+      <section className="px-5 pt-10 pb-8 md:pt-16 md:pb-10 max-w-5xl mx-auto text-center">
+        <div className="ui-sans mb-3" style={{ color: "#C69A2E", fontSize: 13, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          Avespet
+        </div>
+
+        <h1
+          style={{
+            color: "#F1E6D2",
+            fontFamily: "'Fraunces', serif",
+            fontSize: "clamp(34px, 5vw, 52px)",
+            fontWeight: 700,
+            lineHeight: 1.1,
+            marginBottom: 18,
+          }}
+        >
+          Organize o cadastro do seu plantel, de graça.
+        </h1>
+
+        <p
+          className="ui-sans mx-auto"
+          style={{
+            color: "#b09a78",
+            fontSize: 16,
+            lineHeight: 1.7,
+            maxWidth: 720,
+            marginBottom: 30,
+          }}
+        >
+          Sistema completo pra criadores de aves cuidarem do cadastro,
+          financeiro e identificação do plantel — cada criador com o
+          próprio espaço, privado e gratuito.
+        </p>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-w-4xl mx-auto text-left">
+          {[
+            "Cadastro de cada ave com foto",
+            "Árvore genealógica automática",
+            "Controle financeiro de compra e venda",
+            "Gerador de placa de identificação",
+            "Acompanhamento de pós-venda",
+            "Clientes, fornecedores e indicações",
+          ].map((item) => (
+            <div
+              key={item}
+              className="ui-sans rounded-lg px-4 py-3"
+              style={{
+                background: "#3a2314",
+                border: "1px solid #4b3523",
+                color: "#F1E6D2",
+                fontSize: 13,
+                lineHeight: 1.4,
+              }}
+            >
+              <span style={{ color: "#C69A2E", marginRight: 7 }}>✓</span>
+              {item}
+            </div>
+          ))}
+        </div>
       </section>
 
+      {/* Busca por anilha */}
+      <section className="px-5 py-8 md:py-12">
+        <BuscaAnilha />
+      </section>
       {/* Vitrine publica de anuncios */}
       <section className="px-5 pb-16 max-w-6xl mx-auto">
         <h2 className="ui-sans text-center mb-6" style={{ color: "#F1E6D2", fontSize: 22, fontWeight: 700 }}>
