@@ -101,6 +101,8 @@ function emptyMutacao() {
     id: null,
     nome: "",
     nomeAlternativo: "",
+    gene: "",
+    serie: "",
     tipoHeranca: "Autossomica recessiva",
     combinaCom: "",
     comoIdentificar: "",
@@ -1287,9 +1289,8 @@ function AppInner({ user, onLogout }) {
 
             {tab === "mutacoes" && (
   <>
-              <CalculadoraGenetica aves={aves} mutacoes={mutacoes} />
-
-              <div className="my-8 h-px" style={{ background: "#e3d3b4" }} />
+              {isAdminUser && <CalculadoraGenetica aves={aves} mutacoes={mutacoes} />}
+              {isAdminUser && <div className="my-8 h-px" style={{ background: "#e3d3b4" }} />}
 
               <MutacoesTab
               mutacoes={mutacoes}
@@ -1758,6 +1759,11 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
   // selecionado (senao ficaria um clienteId apontando pra dado errado).
   const setComprador = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value, clienteId: "" }));
   const setFornecedor = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value, fornecedorId: "" }));
+  // Se a ave ja tem uma mutacao que nao bate com nenhuma cadastrada no Banco
+  // de Genetica, assume que foi digitada livre ("Outra") e mantem o campo aberto.
+  const [mutacaoLivre, setMutacaoLivre] = useState(
+    () => !!form.corMutacao && !mutacoes.some((m) => m.nome === form.corMutacao)
+  );
 
   return (
     <div className="max-w-3xl">
@@ -1787,25 +1793,38 @@ function FormTab({ form, setForm, onSave, onPhoto, saving, machoOptions, femeaOp
             <Field label="Mutacao / Cor">
   <select
     style={inputStyle}
-    value={form.corMutacao}
-    onChange={set("corMutacao")}
+    value={mutacaoLivre ? "__outra__" : form.corMutacao}
+    onChange={(e) => {
+      if (e.target.value === "__outra__") {
+        setMutacaoLivre(true);
+        setForm((f) => ({ ...f, corMutacao: "" }));
+      } else {
+        setMutacaoLivre(false);
+        setForm((f) => ({ ...f, corMutacao: e.target.value }));
+      }
+    }}
   >
     <option value="">-- selecione --</option>
-    {form.corMutacao && !mutacoes.some((m) => m.nome === form.corMutacao) && (
-      <option value={form.corMutacao}>{form.corMutacao} (nao cadastrada no Banco de Genetica)</option>
-    )}
-        {mutacoes.map((m) => (
+    {mutacoes.map((m) => (
       <option key={m.id} value={m.nome}>{m.nome}</option>
     ))}
+    <option value="__outra__">Outra (digitar)</option>
+  </select>
 
-    </select>
+  {mutacaoLivre && (
+    <input
+      style={{ ...inputStyle, marginTop: 8 }}
+      value={form.corMutacao}
+      onChange={(e) => setForm((f) => ({ ...f, corMutacao: e.target.value }))}
+      placeholder="Digite a mutacao/cor dessa ave"
+    />
+  )}
 
-    {mutacoes.length === 0 && (
-      <div className="ui-sans text-xs mt-1" style={{ color: "#8a7a63" }}>
-        Nenhuma mutacao cadastrada ainda — cadastre em Genetica &gt; Mutacoes primeiro.
-      </div>
-    )}
-
+  {mutacoes.length === 0 && !mutacaoLivre && (
+    <div className="ui-sans text-xs mt-1" style={{ color: "#8a7a63" }}>
+      Nenhuma mutacao cadastrada ainda — cadastre em Genetica &gt; Mutacoes, ou escolha "Outra (digitar)".
+    </div>
+  )}
 </Field>
 
 <Field label="Portador de">
@@ -2758,6 +2777,8 @@ function MutacoesTab({ mutacoes, onSave, onDelete }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <Field label="Nome da mutacao"><input style={inputStyle} value={nova.nome} onChange={(e) => setNova((m) => ({ ...m, nome: e.target.value }))} placeholder="ex: Pallid Azul Turquesa" /></Field>
           <Field label="Nome alternativo"><input style={inputStyle} value={nova.nomeAlternativo} onChange={(e) => setNova((m) => ({ ...m, nomeAlternativo: e.target.value }))} placeholder="opcional" /></Field>
+          <Field label="Gene (locus)"><input style={inputStyle} value={nova.gene} onChange={(e) => setNova((m) => ({ ...m, gene: e.target.value }))} placeholder="ex: bl (blue)" /></Field>
+          <Field label="Serie/Cor base"><input style={inputStyle} value={nova.serie} onChange={(e) => setNova((m) => ({ ...m, serie: e.target.value }))} placeholder="ex: serie Azul" /></Field>
           <Field label="Tipo de heranca">
             <select style={inputStyle} value={nova.tipoHeranca} onChange={(e) => setNova((m) => ({ ...m, tipoHeranca: e.target.value }))}>{TIPOS_HERANCA.map((t) => <option key={t}>{t}</option>)}</select>
           </Field>
@@ -2790,6 +2811,11 @@ function MutacoesTab({ mutacoes, onSave, onDelete }) {
                 {m.synced === false && <span className="text-[10px] font-semibold shrink-0" style={{ color: "#a6402b" }}>NAO SINCRONIZADO</span>}
               </div>
               {m.nomeAlternativo && <div className="text-xs mb-1" style={{ color: "#8a7a63" }}>tambem chamada: {m.nomeAlternativo}</div>}
+              {(m.gene || m.serie) && (
+                <div className="text-xs mb-1 ui-mono" style={{ color: "#7a6a52" }}>
+                  {m.gene && `Gene: ${m.gene}`}{m.gene && m.serie ? " · " : ""}{m.serie && `Serie: ${m.serie}`}
+                </div>
+              )}
               <div className="text-xs mb-1 ui-mono" style={{ color: "#a6402b" }}>{m.tipoHeranca}</div>
               {m.combinaCom && <div className="text-xs mb-1" style={{ color: "#556b3f" }}>Combina com: {m.combinaCom}</div>}
               {m.comoIdentificar && <div className="text-xs mb-1" style={{ color: "#7a6a52" }}>{m.comoIdentificar}</div>}
@@ -3930,7 +3956,9 @@ function AchadoCard({ achado, criador, onAtualizar }) {
       <div className="text-xs mb-1" style={{ color: "#8a7a63" }}>Quem entrou em contato:</div>
       <div className="text-sm font-semibold" style={{ color: "#2B241C" }}>{achado.nome_encontrador}</div>
       <div className="text-xs flex items-center gap-1 mb-2" style={{ color: "#8a7a63" }}><Phone size={11} /> {achado.telefone_encontrador}</div>
-      {achado.mensagem && <div className="text-xs italic mb-3" style={{ color: "#7a6a52" }}>"{achado.mensagem}"</div>}
+      {achado.endereco && <div className="text-xs mb-2" style={{ color: "#2B241C" }}>📍 Encontrada em: {achado.endereco}</div>}
+      {achado.mensagem && <div className="text-xs italic mb-2" style={{ color: "#7a6a52" }}>"{achado.mensagem}"</div>}
+      {achado.foto && <img src={achado.foto} alt="Foto da ave encontrada" className="w-full max-w-[200px] rounded-lg mb-3" />}
 
       <div className="flex gap-2">
         {achado.status !== "contatado" && (
@@ -3986,6 +4014,42 @@ function AchadosTab({ achados, perfis, onAtualizar }) {
 // Autenticacao
 // ---------------------------------------------------------------------------
 
+
+function SuporteWhatsApp() {
+  const mensagem = encodeURIComponent(
+    "Olá! Preciso de suporte no Avespet."
+  );
+
+  return (
+    <a
+      href={`https://wa.me/5511986338898?text=${mensagem}`}
+      target="_blank"
+      rel="noreferrer"
+      aria-label="Falar com o suporte do Avespet pelo WhatsApp"
+      style={{
+        position: "fixed",
+        right: "20px",
+        bottom: "20px",
+        zIndex: 9999,
+        display: "flex",
+        alignItems: "center",
+        gap: "9px",
+        padding: "13px 18px",
+        borderRadius: "999px",
+        background: "#25D366",
+        color: "#FFFFFF",
+        fontWeight: 700,
+        fontSize: "14px",
+        textDecoration: "none",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
+      }}
+    >
+      <MessageCircle size={22} />
+      Suporte
+    </a>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(undefined);
 
@@ -4003,7 +4067,24 @@ export default function App() {
     );
   }
 
-  if (!session) return <AuthPage />;
+  if (!session) {
+  return (
+    <>
+      <AuthPage />
+      <SuporteWhatsApp />
+    </>
+  );
+}
 
-  return <AppInner user={session.user} onLogout={() => supabase.auth.signOut()} />;
+
+
+return (
+  <>
+    <AppInner
+      user={session.user}
+      onLogout={() => supabase.auth.signOut()}
+    />
+    <SuporteWhatsApp />
+  </>
+);
 }

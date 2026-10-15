@@ -8,6 +8,8 @@ import {
 
 const inputStyle = { background: "#fff", border: "1px solid #e3d3b4", color: "#2B241C", borderRadius: 8, padding: "10px 12px", fontSize: 14, outline: "none", width: "100%" };
 
+const SUPORTE_WHATSAPP = "https://wa.me/5511986338898?text=" + encodeURIComponent("Ola! Preciso de ajuda com o site Avespet.");
+
 function money(n) {
   const v = parseFloat(n);
   if (isNaN(v)) return "R$ 0,00";
@@ -33,8 +35,30 @@ function BuscaAnilha() {
   const [resultadosPerdidas, setResultadosPerdidas] = useState(null);
   const [perfisPorUser, setPerfisPorUser] = useState({});
   const [mostrarFormAchado, setMostrarFormAchado] = useState(false);
-  const [formAchado, setFormAchado] = useState({ nome: "", telefone: "", mensagem: "" });
+  const [formAchado, setFormAchado] = useState({ nome: "", telefone: "", endereco: "", mensagem: "", foto: "" });
   const [enviado, setEnviado] = useState(false);
+
+  function handleFotoAchado(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 480;
+        let { width, height } = img;
+        if (width > height && width > maxDim) { height = Math.round((height * maxDim) / width); width = maxDim; }
+        else if (height > maxDim) { width = Math.round((width * maxDim) / height); height = maxDim; }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        setFormAchado((f) => ({ ...f, foto: canvas.toDataURL("image/jpeg", 0.75) }));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  }
 
   async function buscar(e) {
     e.preventDefault();
@@ -75,7 +99,9 @@ function BuscaAnilha() {
     setLoading(true);
     setError("");
     try {
-      await registrarAchadoAnilha(anilha, formAchado.nome, formAchado.telefone, formAchado.mensagem);
+      await registrarAchadoAnilha(
+        anilha, formAchado.nome, formAchado.telefone, formAchado.mensagem, formAchado.endereco, formAchado.foto
+      );
       setEnviado(true);
     } catch {
       setError("Nao consegui registrar agora. Tenta de novo em instantes.");
@@ -136,9 +162,20 @@ function BuscaAnilha() {
           <div className="text-sm" style={{ color: "#2B241C" }}>
             Essa anilha nao apareceu como perdida ainda, mas se voce achou essa ave, deixa seu contato que a gente verifica e retorna.
           </div>
+
+          <label className="ui-sans flex flex-col gap-1.5">
+            <span className="text-xs font-semibold uppercase" style={{ color: "#8a7a63" }}>Foto da ave (opcional)</span>
+            <input type="file" accept="image/*" onChange={handleFotoAchado} className="text-xs" />
+            {formAchado.foto && (
+              <img src={formAchado.foto} alt="" className="w-24 h-24 object-cover rounded-lg mt-1" />
+            )}
+          </label>
+
           <input style={inputStyle} value={formAchado.nome} onChange={(e) => setFormAchado((f) => ({ ...f, nome: e.target.value }))} placeholder="Seu nome" required />
           <input style={inputStyle} value={formAchado.telefone} onChange={(e) => setFormAchado((f) => ({ ...f, telefone: e.target.value }))} placeholder="Seu telefone/WhatsApp" required />
-          <input style={inputStyle} value={formAchado.mensagem} onChange={(e) => setFormAchado((f) => ({ ...f, mensagem: e.target.value }))} placeholder="Onde encontrou (opcional)" />
+          <input style={inputStyle} value={formAchado.endereco} onChange={(e) => setFormAchado((f) => ({ ...f, endereco: e.target.value }))} placeholder="Onde encontrou (endereco/bairro/cidade)" />
+          <input style={inputStyle} value={formAchado.mensagem} onChange={(e) => setFormAchado((f) => ({ ...f, mensagem: e.target.value }))} placeholder="Observacoes (opcional)" />
+
           <button type="submit" disabled={loading} className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold" style={{ background: "#C69A2E", color: "#2B1D14" }}>
             {loading && <Loader2 className="animate-spin" size={16} />} Enviar
           </button>
@@ -146,8 +183,9 @@ function BuscaAnilha() {
       )}
 
       {enviado && (
-        <div className="text-sm px-4 py-3 rounded-lg max-w-md mx-auto" style={{ background: "#e4ead9", color: "#556b3f" }}>
-          Recebido! Vamos verificar e entrar em contato pelo telefone informado.
+        <div className="text-sm px-4 py-3 rounded-lg max-w-md mx-auto text-left" style={{ background: "#e4ead9", color: "#556b3f" }}>
+          Muito obrigado por se importar! 💚 Sabemos que uma ave é um animal de estimação, e muita gente tem um carinho enorme pelo seu bichinho —
+          o seu cuidado em tentar devolver faz toda a diferença. Vamos verificar essa anilha e entrar em contato pelo telefone informado assim que possível.
         </div>
       )}
     </div>
@@ -233,7 +271,7 @@ function VitrinePublica() {
 }
 
 // ---------------------------------------------------------------------------
-// Login / criar conta - agora um modal pequeno, acionado pelo canto
+// Login / criar conta - modal, acionado pelo canto
 // ---------------------------------------------------------------------------
 
 function LoginModal({ onFechar }) {
@@ -319,8 +357,7 @@ export default function AuthPage() {
         </button>
       </header>
 
-      {/* Hero: busca por anilha, o principal da pagina */}
-            {/* Hero principal */}
+      {/* Hero principal */}
       <section className="px-5 pt-10 pb-8 md:pt-16 md:pb-10 max-w-5xl mx-auto text-center">
         <div className="ui-sans mb-3" style={{ color: "#C69A2E", fontSize: 13, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>
           Avespet
@@ -385,6 +422,7 @@ export default function AuthPage() {
       <section className="px-5 py-8 md:py-12">
         <BuscaAnilha />
       </section>
+
       {/* Vitrine publica de anuncios */}
       <section className="px-5 pb-16 max-w-6xl mx-auto">
         <h2 className="ui-sans text-center mb-6" style={{ color: "#F1E6D2", fontSize: 22, fontWeight: 700 }}>
@@ -395,6 +433,9 @@ export default function AuthPage() {
 
       <footer className="text-center ui-sans text-xs py-6" style={{ color: "#6b5638" }}>
         Criador de aves? <button onClick={() => setMostrarLogin(true)} className="underline" style={{ color: "#C69A2E" }}>Cadastre seu plantel gratuitamente</button>
+        <div className="mt-2">
+          Precisa de ajuda? <a href={SUPORTE_WHATSAPP} target="_blank" rel="noopener noreferrer" className="underline" style={{ color: "#C69A2E" }}>Fale com o suporte</a>
+        </div>
       </footer>
 
       {mostrarLogin && <LoginModal onFechar={() => setMostrarLogin(false)} />}

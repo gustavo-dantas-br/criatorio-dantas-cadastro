@@ -158,12 +158,19 @@ export async function incrementarCliqueAnuncio(anuncioId) {
 }
 
 // ---------- Busca geral por anilha - mediada pelo admin (Fase 8F) ----------
-export async function registrarAchadoAnilha(anilha, nome, telefone, mensagem) {
+
+export async function registrarAchadoAnilha(anilha, nome, telefone, mensagem, endereco, foto) {
   const { error } = await supabase.rpc("registrar_achado_anilha", {
-    p_anilha: anilha, p_nome: nome, p_telefone: telefone, p_mensagem: mensagem || "",
+    p_anilha: anilha,
+    p_nome: nome,
+    p_telefone: telefone,
+    p_mensagem: mensagem || "",
+    p_endereco: endereco || "",
+    p_foto: foto || "",
   });
   if (error) throw error;
 }
+
 
 // So funciona se o usuario logado estiver na tabela admins (RLS garante isso)
 export async function listAchadosAnilha() {
