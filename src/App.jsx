@@ -1027,7 +1027,7 @@ function AppInner({ user, onLogout }) {
   setAnuncios((prev) => {
     const others = prev.filter((a) => a.id !== id);
     // anuncio novo sempre comeca "pendente" (so entra no ar depois de aprovado)
-    return [...others, { ...toSave, status: ehNovo ? "pendente" : toSave.status, synced: false }];
+    return [...others, { ...toSave, status: ehNovo ? (isAdminUser ? "aprovado" : "pendente") : toSave.status, synced: false }];
   });
     saveAnuncio(user.id, toSave)
       .then(() => setAnuncios((prev) => prev.map((a) => (a.id === id ? { ...a, synced: true } : a))))
@@ -4067,7 +4067,8 @@ export default function App() {
     );
   }
 
-  if (!session) {
+ 
+if (!session) {
   return (
     <>
       <AuthPage />
