@@ -1255,7 +1255,7 @@ function AppInner({ user, onLogout }) {
           </div>
         ) : (
           <>
-            {tab === "dashboard" && <DashboardTab aves={aves} despesas={despesas} setTab={setTab} goToLista={goToLista} />}
+            {tab === "dashboard" && <DashboardTab aves={aves} despesas={despesas} clientes={clientes} indicacoes={indicacoes} setTab={setTab} goToLista={goToLista} />}
 
             {tab === "lista" && (
               <ListaTab
@@ -1402,7 +1402,7 @@ function StatCard({ label: lbl, value, tone = "default", onClick }) {
   );
 }
 
-function DashboardTab({ aves, despesas, setTab, goToLista }) {
+function DashboardTab({ aves, despesas, clientes = [], indicacoes = [], setTab, goToLista }) {
   const total = aves.length;
   const machos = aves.filter((a) => a.sexo === "Macho").length;
   const femeas = aves.filter((a) => a.sexo === "Femea").length;
@@ -1420,6 +1420,12 @@ function DashboardTab({ aves, despesas, setTab, goToLista }) {
   const falecidas = aves.filter((a) => a.status === "Falecida").length;
   const semSexagem = aves.filter((a) => !a.sexado).length;
   const naoSincronizadas = aves.filter((a) => a.synced === false).length;
+
+  const totalClientes = clientes.length;
+  const totalIndicacoes = indicacoes.length;
+  const posVendasPendentes = aves.filter(
+    (a) => a.status === "Vendida" && (a.clienteSatisfeito || "Pendente") === "Pendente"
+  ).length;
 
   const fin = computeFinanceiro(aves, despesas);
 
@@ -1448,6 +1454,12 @@ function DashboardTab({ aves, despesas, setTab, goToLista }) {
         <StatCard label="Total investido" value={money(fin.totalInvestido)} tone="bad" onClick={() => setTab("financeiro")} />
         <StatCard label="Total vendido" value={money(fin.totalVendas)} tone="good" onClick={() => setTab("financeiro")} />
         <StatCard label={fin.lucro >= 0 ? "Lucro" : "Prejuizo"} value={money(Math.abs(fin.lucro))} tone={fin.lucro >= 0 ? "good" : "bad"} onClick={() => setTab("financeiro")} />
+      </div>
+
+      <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+        <StatCard label="Clientes" value={totalClientes} onClick={() => setTab("clientes")} />
+        <StatCard label="Indicacoes" value={totalIndicacoes} onClick={() => setTab("indicacoes")} />
+        <StatCard label="Pos-vendas pendentes" value={posVendasPendentes} tone="gold" onClick={() => setTab("posvenda")} />
       </div>
 
       {(semSexagem > 0 || naoSincronizadas > 0) && (
