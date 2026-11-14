@@ -63,7 +63,7 @@ export default function CalculadoraGenetica({ aves, mutacoes }) {
       const doseMae = dosagemFator(maeParaCalculo.fatoresGeneticos?.[chave]);
       return { nome, resultados: cruzarDosagemFator(dosePai, doseMae, nome), conhecido: dosePai !== null && doseMae !== null };
     });
-    if (calc.semLociRelevantes) {
+    if (calc.semLociRelevantes && !serieCor && !fatores.some((f) => f.conhecido && f.resultados.length)) {
       const detalhes = [
         calc.bloqueadas?.length ? "Ainda estamos validando: " + calc.bloqueadas.join(", ") + "." : "",
         calc.naoDefinidos?.length ? "A regra genética ainda não está pronta para: " + calc.naoDefinidos.join(", ") + "." : "",
@@ -74,7 +74,7 @@ export default function CalculadoraGenetica({ aves, mutacoes }) {
       });
       return;
     }
-    const possibilidades = calc.resultadoFinal.map((r) => ({
+    const possibilidades = (calc.resultadoFinal || []).map((r) => ({
       nome: r.descricao,
       percentual: `${r.percentual.toFixed(1).replace(/\.0$/, "")}%`,
       detalhe: r.sexo,
@@ -116,7 +116,7 @@ export default function CalculadoraGenetica({ aves, mutacoes }) {
     setResultado({
       tipo: "sucesso",
       cruzamento: `${pai.nome || "Pai"} × ${mae.nome || "Mãe"}`,
-      genotipos: calc.lociConsiderados.join(", "),
+      genotipos: (calc.lociConsiderados || []).join(", "),
       serieCor,
       genotipoPai,
       genotipoMae,
@@ -350,7 +350,7 @@ export default function CalculadoraGenetica({ aves, mutacoes }) {
               {fator.conhecido && fator.resultados.length ? fator.resultados.map((r) => <div key={r.dosagem} className="flex justify-between text-xs mt-1" style={{ color: "#6f6254" }}><span>{r.nome}</span><strong>{r.percentual}%</strong></div>) : <p className="text-xs" style={{ color: "#8a7a63" }}>Não calculado: informe a dosagem dos dois pais, inclusive “sem fator” quando confirmada.</p>}
             </div>)}
           </div>
-          <div className="mt-4 space-y-3">{resultado.possibilidades.map((item, index) => <div key={`${item.nome}-${item.detalhe}-${index}`} className="flex items-center justify-between rounded-xl px-4 py-3 gap-3" style={{ background: "#f2e8d4", border: "1px solid #dfcba7" }}>
+          <div className="mt-4 space-y-3">{resultado.possibilidades.length === 0 ? <p className="text-sm" style={{ color: "#6f6254" }}>Não há mutações adicionais com herança validada informadas para este casal. As possibilidades acima mostram apenas a série de cor e os fatores que puderam ser calculados.</p> : resultado.possibilidades.map((item, index) => <div key={`${item.nome}-${item.detalhe}-${index}`} className="flex items-center justify-between rounded-xl px-4 py-3 gap-3" style={{ background: "#f2e8d4", border: "1px solid #dfcba7" }}>
             <div><div className="font-semibold">{item.nome}</div><div className="text-xs mt-1" style={{ color: "#8a7a63" }}>{item.detalhe}</div></div><span className="font-semibold">{item.percentual}</span>
           </div>)}</div>
           <div className="mt-5 rounded-xl p-4" style={{ background: "#f5e9c8", border: "1px solid #dfcba7" }}>
