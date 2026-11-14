@@ -8,6 +8,7 @@ function emptyAve() {
     sexo: "Indefinido",
     // Campos genéticos opcionais, mantendo compatibilidade com cadastros antigos.
     corBase: "",
+    serieCorGenotipo: "",
     corMutacao: "",
     mutacoesVisuais: [],
     fatoresGeneticos: { darkFactor: "", violetFactor: "" },

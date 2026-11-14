@@ -89,7 +89,7 @@ export function dosagemFator(valor) {
 
 export function cruzarDosagemFator(dosagemPai, dosagemMae, nome) {
   if (![0, 1, 2].includes(dosagemPai) || ![0, 1, 2].includes(dosagemMae)) return [];
-  const gametas = (dose) => dose === 0 ? [0] : dose === 1 ? [0, 1] : [1];
+  const gametas = (dose) => dose === 0 ? [0, 0] : dose === 1 ? [0, 1] : [1, 1];
   const resultados = new Map();
   for (const a of gametas(dosagemPai)) {
     for (const b of gametas(dosagemMae)) {
