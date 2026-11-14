@@ -30,3 +30,24 @@ test("G/T x B/B produz 50% G/B e 50% T/B", () => {
   const resultado = cruzarSerieCor(["G", "T"], ["B", "B"]);
   assert.deepEqual(resultado.map((r) => [r.genotipo, r.percentual]), [["G/B", 50], ["T/B", 50]]);
 });
+
+import { genotipoSerieDaAve, dosagemFator, cruzarDosagemFator } from "../src/features/genetica/utils/serieCorRingNeck.js";
+
+test("nao presume genotipo verde quando portadores nao foram informados", () => {
+  assert.equal(genotipoSerieDaAve({ corBase: "Green (Verde)", portadores: [] }), null);
+  assert.deepEqual(genotipoSerieDaAve({ corBase: "Green (Verde)", portadores: ["Blue"] }), ["G", "B"]);
+  assert.deepEqual(genotipoSerieDaAve({ corBase: "Green (Verde)", portadores: ["Turquoise"] }), ["G", "T"]);
+});
+
+test("converte dosagem explicita e preserva informacao desconhecida", () => {
+  assert.equal(dosagemFator(""), null);
+  assert.equal(dosagemFator("NONE"), 0);
+  assert.equal(dosagemFator("SF"), 1);
+  assert.equal(dosagemFator("DF"), 2);
+});
+
+test("cruza fatores escuros/violetas por dosagem mendeliana", () => {
+  assert.deepEqual(cruzarDosagemFator(1, 1, "Dark Factor").map((r) => [r.dosagem, r.percentual]), [[0, 25], [1, 50], [2, 25]]);
+  assert.deepEqual(cruzarDosagemFator(2, 0, "Violet Factor").map((r) => [r.dosagem, r.percentual]), [[1, 100]]);
+  assert.deepEqual(cruzarDosagemFator(null, 0, "Dark Factor"), []);
+});
