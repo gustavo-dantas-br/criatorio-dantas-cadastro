@@ -261,6 +261,19 @@ export default function CalculadoraGenetica({ aves, mutacoes }) {
                     ))}
                   </div>
                 </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: "#5e5143" }}>Genótipo da série de cor (se confirmado)</label>
+                  <select className="w-full rounded-xl px-3 py-2" style={campo} value={manual.serieCorGenotipo || ""} onChange={(e) => atualizarManual(setManual, "serieCorGenotipo", e.target.value)}>
+                    <option value="">Não sei / não confirmado</option>
+                    <option value="G/G">G/G — Verde sem alelo azul/turquesa conhecido</option>
+                    <option value="G/T">G/T — Verde portador de turquesa</option>
+                    <option value="G/B">G/B — Verde portador de azul</option>
+                    <option value="T/T">T/T — Turquesa</option>
+                    <option value="T/B">T/B — Azul turquesa</option>
+                    <option value="B/B">B/B — Azul</option>
+                  </select>
+                  <p className="text-xs mt-1" style={{ color: "#8a7a63" }}>Não escolha G/G apenas pela aparência verde. Use o histórico genético ou a descendência conhecida.</p>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <label className="text-sm" style={{ color: "#5e5143" }}>Fator escuro
                     <select className="w-full rounded-xl px-3 py-2 mt-1" style={campo} value={manual.fatoresGeneticos?.darkFactor || ""} onChange={(e) => setManual((v) => ({ ...v, fatoresGeneticos: { ...(v.fatoresGeneticos || {}), darkFactor: e.target.value } }))}>
