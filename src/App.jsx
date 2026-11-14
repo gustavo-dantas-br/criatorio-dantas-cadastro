@@ -97,6 +97,8 @@ const STATUS_ANUNCIO_LABEL = { pendente: "EM ANALISE", aprovado: "APROVADO", rej
 function AppInner({ user, onLogout }) {
   const [aves, setAves] = useState([]);
   const [despesas, setDespesas] = useState([]);
+  const [reservasFinanceiro, setReservasFinanceiro] = useState([]);
+  const [pagamentosReservasFinanceiro, setPagamentosReservasFinanceiro] = useState([]);
   const [mutacoes, setMutacoes] = useState([]);
   const [clientes, setClientes] = useState([]);
   const [fornecedores, setFornecedores] = useState([]);
@@ -120,7 +122,7 @@ function AppInner({ user, onLogout }) {
   const [saving, setSaving] = useState(false);
   const [placaId, setPlacaId] = useState("");
   const [arvoreId, setArvoreId] = useState("");
-  const [statusFilter, setStatusFilter] = useState(null); // null | "A venda" | "Vendida" | "Falecida" | "casais" | "solteiros" | "plantel"
+  const [statusFilter, setStatusFilter] = useState("plantel"); // categoria inicial do Meu plantel
   const [error, setError] = useState("");
   const canvasRef = useRef(null);
 
@@ -143,6 +145,21 @@ function AppInner({ user, onLogout }) {
       setDespesas(items.map((d) => ({ ...d, synced: true })).sort((a, b) => (a.data || "").localeCompare(b.data || "")));
     } catch {
       // silencioso
+    }
+  }, [user.id]);
+
+  const loadReservasFinanceiro = useCallback(async () => {
+    try {
+      const [r, p] = await Promise.all([
+        supabase.from("reservas_aves").select("id, cliente_id, ave_id, valor_total, status, data_reserva, updated_at").eq("user_id", user.id).eq("status", "concluida"),
+        supabase.from("reserva_pagamentos").select("id, reserva_id, valor, data_pagamento, status, descricao, forma_pagamento").eq("user_id", user.id),
+      ]);
+      if (r.error) throw r.error;
+      if (p.error) throw p.error;
+      setReservasFinanceiro(r.data || []);
+      setPagamentosReservasFinanceiro(p.data || []);
+    } catch (e) {
+      setError("Não foi possível atualizar os recebimentos das reservas (" + (e?.message || "erro desconhecido") + ").");
     }
   }, [user.id]);
 
@@ -268,6 +285,7 @@ function AppInner({ user, onLogout }) {
   useEffect(() => {
     loadAves();
     loadDespesas();
+    loadReservasFinanceiro();
     loadMutacoes();
     loadClientes();
     loadFornecedores();
@@ -277,7 +295,7 @@ function AppInner({ user, onLogout }) {
     loadAdminStatus();
     loadPerdidas();
     loadPosturas();
-  }, [loadAves, loadDespesas, loadMutacoes, loadClientes, loadFornecedores, loadIndicacoes, loadAnuncios, loadPerfil, loadAdminStatus, loadPerdidas, loadPosturas]);
+  }, [loadAves, loadDespesas, loadReservasFinanceiro, loadMutacoes, loadClientes, loadFornecedores, loadIndicacoes, loadAnuncios, loadPerfil, loadAdminStatus, loadPerdidas, loadPosturas]);
 
   function startNew() {
     setForm(emptyAve());
@@ -285,7 +303,7 @@ function AppInner({ user, onLogout }) {
   }
 
   function goToLista(filter) {
-    setStatusFilter(filter);
+    setStatusFilter(filter || "plantel");
     setTab("lista");
   }
 
@@ -503,11 +521,13 @@ function AppInner({ user, onLogout }) {
     try {
       await saveRow("mutacoes", user.id, toSave);
       setMutacoes((prev) => prev.map((m) => (m.id === id ? { ...m, synced: true } : m)));
+      return true;
     } catch (e) {
       setError(
         `Mutacao ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}). ` +
         "Se a tabela 'mutacoes' ainda nao existe no seu Supabase, roda o schema_fase2.sql no SQL Editor."
       );
+      return false;
     }
   }
 
@@ -733,30 +753,35 @@ function AppInner({ user, onLogout }) {
     }
   }
 
-  function handleSavePerfil(novoPerfil) {
+  async function handleSavePerfil(novoPerfil) {
     setPerfil({ ...novoPerfil, synced: false });
-    savePerfil(user.id, (() => { const { email, ...publico } = novoPerfil; return publico; })())
-      .then(() => setPerfil({ ...novoPerfil, synced: true }))
-      .catch((e) => setError(
-        `Perfil ficou na tela, mas nao salvou no banco (${e?.message || "erro desconhecido"}). ` +
-        "Se a tabela 'perfil_criador' ainda nao existe no seu Supabase, roda o schema_fase_anuncios.sql no SQL Editor."
-      ));
+    try {
+      const { email, ...publico } = novoPerfil;
+      await savePerfil(user.id, publico);
+      setPerfil({ ...novoPerfil, synced: true });
+    } catch (e) {
+      setError(
+        `Nao foi possivel salvar o perfil no banco (${e?.message || "erro desconhecido"}). ` +
+        "Confira se a tabela 'perfil_criador' esta disponivel."
+      );
+      throw e;
+    }
   }
 
   async function handleSavePerfilPrivado(dados) {
-    setPerfilPrivado(dados);
     try {
       await savePerfilPrivado(user.id, dados);
-      setError("");
+      setPerfilPrivado(dados);
     } catch (e) {
       setError("Nao foi possivel salvar o endereco privado (" + (e?.message || "erro desconhecido") + ").");
+      throw e;
     }
   }
 
   async function handleUpdateEmail(novoEmail) {
     const { error: authError } = await supabase.auth.updateUser({ email: novoEmail });
-    if (authError) setError("Nao foi possivel solicitar a troca de e-mail: " + authError.message);
-    else setError("Solicitacao enviada. Confirme o novo e-mail pelo link enviado pelo Supabase para concluir a alteracao.");
+    if (authError) throw new Error("Nao foi possivel solicitar a troca de e-mail: " + authError.message);
+    return "A solicitacao de troca de e-mail foi enviada; confirme pelo link recebido para concluir a alteracao.";
   }
 
   async function handleModerarAnuncio(id, novoStatus) {
@@ -958,6 +983,7 @@ Registros com o mesmo ID serao sobrescritos pelos do arquivo. Nada e apagado.`))
   const parceiro = arvoreAve?.parceiroId ? aves.find((a) => a.id === arvoreAve.parceiroId) : null;
 
   const navGroups = [
+    { title: "CONTA", items: [{ id: "perfil", label: "Meu perfil", icon: UserCircle }] },
     { title: "VISÃO GERAL", items: [{ id: "dashboard", label: "Dashboard", icon: LayoutDashboard }] },
     { title: "MEU CRIATÓRIO", items: [
       { id: "lista", label: "Meu plantel", icon: Bird },
@@ -978,7 +1004,6 @@ Registros com o mesmo ID serao sobrescritos pelos do arquivo. Nada e apagado.`))
     { title: "AVESPET", items: [
       { id: "anuncios", label: "Anúncios", icon: Megaphone },
       { id: "perdi-uma-ave", label: "Ave perdida", icon: Bird },
-      { id: "perfil", label: "Meu perfil", icon: UserCircle },
     ] },
     ...(isAdminUser ? [{ title: "ADMINISTRAÇÃO", items: [
       { id: "aprovacoes", label: "Aprovações", icon: ShieldCheck },
@@ -1042,6 +1067,7 @@ Registros com o mesmo ID serao sobrescritos pelos do arquivo. Nada e apagado.`))
               <div className="text-lg font-extrabold tracking-tight" style={{ color: "#1D3B2B" }}>Aves<span style={{ color: "#26945F" }}>pet</span></div>
               <div className="text-[10px] font-semibold tracking-[0.12em]" style={{ color: "#526A5B" }}>ÁREA DO CRIADOR</div>
             </div>}
+            {!sidebarCollapsed && perfil.logoUrl && <img src={perfil.logoUrl} alt="Logo do criatório" className="h-10 w-10 shrink-0 rounded-xl border border-[#E2EBE4] bg-white object-contain p-0.5" />}
           </div>
           {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} aria-label="Recolher menu" title="Recolher menu" className="rounded-lg p-2 hover:bg-[#F1F6F2]" style={{ color: "#3F5D49" }}><ChevronLeft size={18} /></button>}
           {sidebarCollapsed && <button onClick={() => setSidebarCollapsed(false)} aria-label="Expandir menu" title="Expandir menu" className="absolute -right-3 top-7 rounded-full border bg-white p-1.5 shadow-sm" style={{ borderColor: "#E2EBE4", color: "#267A50" }}><ChevronRight size={16} /></button>}
@@ -1069,6 +1095,7 @@ Registros com o mesmo ID serao sobrescritos pelos do arquivo. Nada e apagado.`))
           </div>
           <div className="flex items-center gap-2">
             <div className="hidden sm:block text-right"><div className="text-xs font-semibold" style={{ color: "#345442" }}>{perfil.nome || "Criador"}</div><div className="text-[10px]" style={{ color: "#526A5B" }}>Área do criador</div></div>
+            {perfil.logoUrl && <img src={perfil.logoUrl} alt="Logo do criatório" className="h-9 w-9 rounded-lg border border-[#D7E4DA] bg-white object-contain p-0.5" />}
             <div className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-bold" style={{ background: "#E5F2E9", color: "#267A50" }}>{(perfil.nome || user.email || "C").slice(0,1).toUpperCase()}</div>
           </div>
         </header>
@@ -1077,7 +1104,7 @@ Registros com o mesmo ID serao sobrescritos pelos do arquivo. Nada e apagado.`))
           <button aria-label="Fechar menu" onClick={() => setMobileMenuOpen(false)} className="absolute inset-0 bg-black/40" />
           <div className="absolute inset-y-0 left-0 flex w-[min(86vw,340px)] flex-col bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b px-4 py-4" style={{ borderColor: "#E5EDE7" }}>
-              <div className="flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "#E5F2E9", color: "#1D754B" }}><Feather size={19} /></div><div className="font-extrabold" style={{ color: "#1D3B2B" }}>Aves<span style={{ color: "#26945F" }}>pet</span></div></div>
+              <div className="flex items-center gap-2"><div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "#E5F2E9", color: "#1D754B" }}><Feather size={19} /></div><div className="font-extrabold" style={{ color: "#1D3B2B" }}>Aves<span style={{ color: "#26945F" }}>pet</span></div>{perfil.logoUrl && <img src={perfil.logoUrl} alt="Logo do criatório" className="h-9 w-9 rounded-lg border border-[#E2EBE4] bg-white object-contain p-0.5" />}</div>
               <button onClick={() => setMobileMenuOpen(false)} aria-label="Fechar menu" className="rounded-lg p-2" style={{ color: "#3F5D49" }}><X size={20} /></button>
             </div>
             <nav className="flex-1 overflow-y-auto px-3 py-3">{renderNav(false, true)}</nav>
@@ -1110,11 +1137,11 @@ Registros com o mesmo ID serao sobrescritos pelos do arquivo. Nada e apagado.`))
               <ReproducaoTab aves={aves} posturas={posturas} onSave={handleSavePostura} onDelete={handleDeletePostura} onNascimento={handleRegistrarNascimento} Card={Card} Field={Field} inputStyle={inputStyle} SectionTitle={SectionTitle} />
             )}
 
-            {tab === "reservas" && <ReservasTab userId={user.id} perfil={perfil} clientes={clientes} aves={aves} posturas={posturas} Card={Card} SectionTitle={SectionTitle} />}
+            {tab === "reservas" && <ReservasTab userId={user.id} perfil={perfil} clientes={clientes} aves={aves} posturas={posturas} onReservaConcluida={loadAves} onFinanceiroAtualizado={loadReservasFinanceiro} Card={Card} SectionTitle={SectionTitle} />}
 
             {tab === "lista" && (
               <ListaTab
-                aves={filtered} search={search} setSearch={setSearch}
+                aves={filtered} todasAves={aves} search={search} setSearch={setSearch}
                 onEdit={startEdit} onDelete={handleDelete} onNew={startNew}
                 onSync={handleSync} onExport={handleExport} onImport={handleImport}
                 statusFilter={statusFilter} setStatusFilter={setStatusFilter}
@@ -1143,12 +1170,12 @@ Registros com o mesmo ID serao sobrescritos pelos do arquivo. Nada e apagado.`))
             )}
 
             {tab === "financeiro" && (
-              <FinanceiroTab aves={aves} despesas={despesas} onSaveDespesa={handleSaveDespesa} onDeleteDespesa={handleDeleteDespesa} emptyDespesa={emptyDespesa} primeiroDiaMesISO={primeiroDiaMesISO} hojeISO={hojeISO} ultimoDiaMesISO={ultimoDiaMesISO} primeiroDiaAnoISO={primeiroDiaAnoISO} computeFinanceiro={computeFinanceiro} computeFinanceiroPeriodo={computeFinanceiroPeriodo} money={money} DESPESA_TIPOS={DESPESA_TIPOS} inputStyle={inputStyle} SectionTitle={SectionTitle} Card={Card} Field={Field} />
+              <FinanceiroTab aves={aves} despesas={despesas} reservasFinanceiro={reservasFinanceiro} pagamentosReservasFinanceiro={pagamentosReservasFinanceiro} clientes={clientes} onSaveDespesa={handleSaveDespesa} onDeleteDespesa={handleDeleteDespesa} emptyDespesa={emptyDespesa} primeiroDiaMesISO={primeiroDiaMesISO} hojeISO={hojeISO} ultimoDiaMesISO={ultimoDiaMesISO} primeiroDiaAnoISO={primeiroDiaAnoISO} computeFinanceiro={computeFinanceiro} computeFinanceiroPeriodo={computeFinanceiroPeriodo} money={money} DESPESA_TIPOS={DESPESA_TIPOS} inputStyle={inputStyle} SectionTitle={SectionTitle} Card={Card} Field={Field} />
             )}
 
             {tab === "mutacoes" && (
   <>
-              {isAdminUser && <CalculadoraGenetica aves={aves} mutacoes={mutacoes} />}
+              <CalculadoraGenetica aves={aves} mutacoes={mutacoes} />
               {isAdminUser && <div className="my-8 h-px" style={{ background: "#e3d3b4" }} />}
 
               <MutacoesTab

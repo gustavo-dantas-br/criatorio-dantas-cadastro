@@ -5,7 +5,7 @@ import { supabase } from "../../supabaseClient";
 const moneyBR = (v) => Number(v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const dateBR = (v) => v ? new Date(v + "T12:00:00").toLocaleDateString("pt-BR") : "—";
 
-export default function ReservasTab({ userId, perfil = {}, clientes = [], aves = [], posturas = [], Card, SectionTitle }) {
+export default function ReservasTab({ userId, perfil = {}, clientes = [], aves = [], posturas = [], onReservaConcluida, onFinanceiroAtualizado, Card, SectionTitle }) {
   const [reservas, setReservas] = useState([]);
   const [pagamentos, setPagamentos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -74,7 +74,7 @@ export default function ReservasTab({ userId, perfil = {}, clientes = [], aves =
     setSaving(true); setErro("");
     const { error } = await supabase.from("reserva_pagamentos").insert({ reserva_id: reserva.id, user_id: userId, valor, data_pagamento: f.data || new Date().toISOString().slice(0,10), forma_pagamento: f.forma || null, descricao: f.descricao || null, status: "recebido" });
     if (error) setErro("Não foi possível registrar o pagamento: " + error.message);
-    else { setPagamentoForm(v => ({ ...v, [reserva.id]: {} })); await carregar(); }
+    else { setPagamentoForm(v => ({ ...v, [reserva.id]: {} })); await carregar(); if (onFinanceiroAtualizado) await onFinanceiroAtualizado(); }
     setSaving(false);
   };
 
@@ -117,7 +117,35 @@ export default function ReservasTab({ userId, perfil = {}, clientes = [], aves =
     janela.document.open(); janela.document.write(html); janela.document.close();
   };
 
+
+  const concluirReserva = async (r) => {
+    if (!r.ave_id || !r.cliente_id) {
+      setErro("Vincule uma ave e um cliente antes de concluir a venda.");
+      return;
+    }
+    const confirmado = window.confirm("Confirmar a venda desta ave pelo valor total de " + moneyBR(r.valor_total) + "? Os pagamentos já registrados serão preservados.");
+    if (!confirmado) return;
+    setSaving(true); setErro("");
+    const { data, error } = await supabase.rpc("concluir_reserva_ave", { p_reserva_id: r.id });
+    if (error) {
+      setErro("Não foi possível concluir a venda: " + error.message);
+    } else {
+      await carregar();
+      if (onReservaConcluida) await onReservaConcluida();
+      if (onFinanceiroAtualizado) await onFinanceiroAtualizado();
+      const saldoPendente = Number(data?.saldo_pendente || 0);
+      if (saldoPendente > 0) {
+        setErro("Venda concluída. Saldo que continua pendente: " + moneyBR(saldoPendente) + ". Consulte o histórico da reserva para acompanhar o recebimento.");
+      }
+    }
+    setSaving(false);
+  };
+
   const atualizarStatus = async (r, status) => {
+    if (status === "concluida") {
+      setErro("Use o botão Concluir venda para atualizar a ave e a reserva juntas.");
+      return;
+    }
     const { error } = await supabase.from("reservas_aves").update({ status, updated_at: new Date().toISOString() }).eq("id", r.id).eq("user_id", userId);
     if (error) setErro("Não foi possível atualizar a reserva: " + error.message); else await carregar();
   };
@@ -156,8 +184,8 @@ export default function ReservasTab({ userId, perfil = {}, clientes = [], aves =
         {aberta&&<div className="border-t px-4 py-4 sm:px-5" style={{borderColor:"#E2EBE4"}}><div className="grid gap-3 text-sm sm:grid-cols-3"><div><span className="text-xs" style={{color:"#668071"}}>Valor combinado</span><div className="font-bold" style={{color:"#203B2C"}}>{moneyBR(r.valor_total)}</div></div><div><span className="text-xs" style={{color:"#668071"}}>Cliente / contato</span><div className="font-semibold" style={{color:"#203B2C"}}>{cliente?.nome||"—"}</div><div className="text-xs" style={{color:"#668071"}}>{cliente?.telefone||"Telefone não cadastrado"}</div></div><div><span className="text-xs" style={{color:"#668071"}}>Previsão nascimento</span><div className="font-semibold" style={{color:"#203B2C"}}>{dateBR(r.previsao_nascimento)}</div></div></div>
         {r.observacoes&&<p className="mt-3 rounded-lg p-3 text-xs" style={{background:"#F5F8F5",color:"#52705D"}}>{r.observacoes}</p>}
         <h4 className="mt-4 text-xs font-bold uppercase tracking-wide" style={{color:"#496653"}}>Histórico de pagamentos</h4>{pays.length===0?<p className="mt-2 text-xs" style={{color:"#668071"}}>Nenhum pagamento registrado.</p>:<div className="mt-2 space-y-2">{pays.map(p=><div key={p.id} className="flex flex-wrap justify-between gap-2 rounded-lg px-3 py-2 text-xs" style={{background:"#F5F8F5",color:"#496653"}}><span>{dateBR(p.data_pagamento)} · {p.descricao||p.forma_pagamento||"Pagamento"}</span><strong>{moneyBR(p.valor)}</strong></div>)}</div>}
-        {saldo>0&&!["concluida","cancelada"].includes(r.status)&&<div className="mt-4 rounded-xl p-3" style={{background:"#F5F8F5"}}><h4 className="mb-2 text-xs font-bold" style={{color:"#496653"}}>Registrar novo pagamento</h4><div className="grid gap-2 sm:grid-cols-[1fr_150px_1fr_auto]"><input type="number" min="0.01" max={saldo} step="0.01" placeholder="Valor recebido" value={pagamentoForm[r.id]?.valor||""} onChange={e=>setPagamentoForm(v=>({...v,[r.id]:{...v[r.id],valor:e.target.value}}))} className="min-h-10 rounded-lg border px-3 text-sm" style={{borderColor:"#D8E5DB",color:"#203B2C"}}/><input type="date" value={pagamentoForm[r.id]?.data||new Date().toISOString().slice(0,10)} onChange={e=>setPagamentoForm(v=>({...v,[r.id]:{...v[r.id],data:e.target.value}}))} className="min-h-10 rounded-lg border px-3 text-sm" style={{borderColor:"#D8E5DB",color:"#203B2C"}}/><input placeholder="Forma / observação" value={pagamentoForm[r.id]?.forma||""} onChange={e=>setPagamentoForm(v=>({...v,[r.id]:{...v[r.id],forma:e.target.value}}))} className="min-h-10 rounded-lg border px-3 text-sm" style={{borderColor:"#D8E5DB",color:"#203B2C"}}/><button disabled={saving} onClick={()=>adicionarPagamento(r)} className="rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50" style={{background:"#18764B",color:"#fff"}}>Registrar</button></div></div>}
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><button type="button" onClick={()=>imprimirOrdem(r)} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold" style={{borderColor:"#CFE0D3",color:"#18764B",background:"#F5FAF6"}}><Printer size={14}/> Imprimir ordem de reserva</button><div className="flex items-center gap-2"><div className="text-xs" style={{color:"#668071"}}>Situação da reserva</div><select value={r.status} onChange={e=>atualizarStatus(r,e.target.value)} className="min-h-9 rounded-lg border px-3 text-xs font-semibold" style={{borderColor:"#D8E5DB",color:"#496653"}}><option value="aguardando_nascimento">Aguardando nascimento</option><option value="aguardando_sinal">Aguardando sinal</option><option value="reservada">Reservada</option><option value="concluida">Concluída</option><option value="cancelada">Cancelada</option></select></div></div>
+        {saldo>0&&r.status!=="cancelada"&&<div className="mt-4 rounded-xl p-3" style={{background:"#F5F8F5"}}><h4 className="mb-2 text-xs font-bold" style={{color:"#496653"}}>Registrar novo pagamento</h4><div className="grid gap-2 sm:grid-cols-[1fr_150px_1fr_auto]"><input type="number" min="0.01" max={saldo} step="0.01" placeholder="Valor recebido" value={pagamentoForm[r.id]?.valor||""} onChange={e=>setPagamentoForm(v=>({...v,[r.id]:{...v[r.id],valor:e.target.value}}))} className="min-h-10 rounded-lg border px-3 text-sm" style={{borderColor:"#D8E5DB",color:"#203B2C"}}/><input type="date" value={pagamentoForm[r.id]?.data||new Date().toISOString().slice(0,10)} onChange={e=>setPagamentoForm(v=>({...v,[r.id]:{...v[r.id],data:e.target.value}}))} className="min-h-10 rounded-lg border px-3 text-sm" style={{borderColor:"#D8E5DB",color:"#203B2C"}}/><input placeholder="Forma / observação" value={pagamentoForm[r.id]?.forma||""} onChange={e=>setPagamentoForm(v=>({...v,[r.id]:{...v[r.id],forma:e.target.value}}))} className="min-h-10 rounded-lg border px-3 text-sm" style={{borderColor:"#D8E5DB",color:"#203B2C"}}/><button disabled={saving} onClick={()=>adicionarPagamento(r)} className="rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50" style={{background:"#18764B",color:"#fff"}}>Registrar</button></div></div>}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap items-center gap-2"><button type="button" onClick={()=>imprimirOrdem(r)} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold" style={{borderColor:"#CFE0D3",color:"#18764B",background:"#F5FAF6"}}><Printer size={14}/> Imprimir ordem de reserva</button>{!["concluida","cancelada"].includes(r.status)&&r.ave_id&&r.cliente_id&&<button type="button" disabled={saving} onClick={()=>concluirReserva(r)} className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50" style={{background:"#18764B",color:"#fff"}}><CheckCircle2 size={14}/>{saving?"Concluindo...":"Concluir venda"}</button>}</div><div className="flex items-center gap-2"><div className="text-xs" style={{color:"#668071"}}>Situação da reserva</div><select value={r.status} onChange={e=>atualizarStatus(r,e.target.value)} className="min-h-9 rounded-lg border px-3 text-xs font-semibold" style={{borderColor:"#D8E5DB",color:"#496653"}}><option value="aguardando_nascimento">Aguardando nascimento</option><option value="aguardando_sinal">Aguardando sinal</option><option value="reservada">Reservada</option><option value="cancelada">Cancelada</option></select></div></div>
         </div>}
       </Card>})}</div>}
     <div className="flex justify-end"><button onClick={carregar} className="inline-flex items-center gap-2 text-xs font-semibold" style={{color:"#52705D"}}><RefreshCw size={14}/> Atualizar lista</button></div>

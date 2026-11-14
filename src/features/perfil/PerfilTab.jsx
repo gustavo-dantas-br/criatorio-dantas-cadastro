@@ -6,7 +6,9 @@ export default function PerfilTab({ perfil, privado, email, onSave, onSavePrivad
   const [form, setForm] = useState(perfil);
   const [endereco, setEndereco] = useState(privado);
   const [novoEmail, setNovoEmail] = useState(email || "");
-  const [salvo, setSalvo] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [mensagem, setMensagem] = useState("");
+  const [erro, setErro] = useState("");
   useEffect(() => setForm(perfil), [perfil]);
   useEffect(() => setEndereco(privado || {}), [privado]);
   useEffect(() => setNovoEmail(email || ""), [email]);
@@ -39,18 +41,34 @@ export default function PerfilTab({ perfil, privado, email, onSave, onSavePrivad
     } catch { alert("Não foi possível carregar essa imagem. Tente outro arquivo."); }
   }
 
-  function submit() {
-    onSave({ ...form, email: novoEmail });
-    onSavePrivado(endereco);
-    if (novoEmail.trim() && novoEmail.trim() !== email) onUpdateEmail(novoEmail.trim());
-    setSalvo(true);
-    setTimeout(() => setSalvo(false), 2500);
+  async function submit() {
+    if (salvando) return;
+    setSalvando(true);
+    setMensagem("");
+    setErro("");
+    try {
+      await Promise.all([
+        onSave({ ...form, email: novoEmail }),
+        onSavePrivado(endereco),
+      ]);
+      let retorno = "Perfil e endereço salvos com sucesso.";
+      const emailSolicitado = novoEmail.trim();
+      if (emailSolicitado && emailSolicitado !== email) {
+        const respostaEmail = await onUpdateEmail(emailSolicitado);
+        if (respostaEmail) retorno += " " + respostaEmail;
+      }
+      setMensagem(retorno);
+    } catch (e) {
+      setErro(e?.message || "Não foi possível salvar o perfil. Confira a conexão e tente novamente.");
+    } finally {
+      setSalvando(false);
+    }
   }
 
   return (
     <div className="max-w-xl">
       <SectionTitle>Perfil do Criador</SectionTitle>
-      <p className="ui-sans text-sm mb-5" style={{ color: "#F1E6D2" }}>
+      <p className="ui-sans text-sm mb-5" style={{ color: "#334155" }}>
         Nome do criatorio, cidade, UF e WhatsApp podem aparecer nos anuncios. Seu endereco completo e seu e-mail ficam privados.
       </p>
       <Card className="p-4 sm:p-6">
@@ -88,9 +106,10 @@ export default function PerfilTab({ perfil, privado, email, onSave, onSavePrivad
           ))}
         </div>
         {form.synced === false && <div className="ui-sans text-xs mb-3" style={{ color: "#a6402b" }}>Salvando no banco...</div>}
-        {salvo && <div className="ui-sans text-sm mb-3 px-3 py-2 rounded-lg" style={{ background: "#e4ead9", color: "#556b3f" }}>Perfil salvo.</div>}
-        <button onClick={submit} className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: "#C69A2E", color: "#2B1D14" }}>
-          <Save size={15} /> Salvar perfil
+        {mensagem && <div role="status" className="ui-sans text-sm mb-3 px-3 py-2 rounded-lg" style={{ background: "#e4ead9", color: "#556b3f" }}>{mensagem}</div>}
+        {erro && <div role="alert" className="ui-sans text-sm mb-3 px-3 py-2 rounded-lg" style={{ background: "#f5dfda", color: "#8b3d30" }}>{erro}</div>}
+        <button onClick={submit} disabled={salvando} className="ui-sans flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60" style={{ background: "#C69A2E", color: "#2B1D14" }}>
+          <Save size={15} /> {salvando ? "Salvando..." : "Salvar perfil"}
         </button>
       </Card>
     </div>

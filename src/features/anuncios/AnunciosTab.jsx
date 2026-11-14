@@ -98,7 +98,7 @@ export default function AnunciosTab({ aves, anuncios, perfil, onSave, onToggleAt
         </div>
       )}
 
-      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>AVES DISPONIVEIS PRA ANUNCIAR</div>
+      <div className="ui-mono text-xs mb-3" style={{ color: "#173D29" }}>AVES DISPONIVEIS PRA ANUNCIAR</div>
       {avesAnunciaveis.length === 0 ? (
         <Card className="p-4 mb-6 ui-sans text-sm" style={{ color: "#8a7a63" }}>
           Nenhuma ave nova pra anunciar (marca uma ave como "A venda" no cadastro pra ela aparecer aqui).
@@ -126,7 +126,7 @@ export default function AnunciosTab({ aves, anuncios, perfil, onSave, onToggleAt
         </div>
       )}
 
-      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>MEUS ANUNCIOS ({anuncios.length})</div>
+      <div className="ui-mono text-xs mb-3" style={{ color: "#173D29" }}>MEUS ANUNCIOS ({anuncios.length})</div>
       {anuncios.length === 0 ? (
         <Card className="p-6 text-center ui-sans" style={{ color: "#8a7a63" }}>Nenhum anuncio publicado ainda.</Card>
       ) : (

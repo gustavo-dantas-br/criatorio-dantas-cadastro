@@ -47,7 +47,7 @@ export default function AprovacoesTab({ anuncios, perfis, onModerar, Card, Secti
   return (
     <div>
       <SectionTitle>Aprovacoes</SectionTitle>
-      <p className="ui-sans text-sm mb-5" style={{ color: "#F1E6D2" }}>
+      <p className="ui-sans text-sm mb-5" style={{ color: "#334155" }}>
         Painel administrativo - aqui voce ve anuncios de todos os criadores da plataforma, nao so os seus.
       </p>
 

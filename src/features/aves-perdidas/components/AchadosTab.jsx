@@ -84,8 +84,8 @@ export default function AchadosTab({ achados = [], perfis = [], anuncios = [], o
 
   return (
     <section>
-      <h2 className="mb-2" style={{ color: "#F1E6D2", fontSize: 24, fontWeight: 700 }}>Achados por Anilha</h2>
-      <p className="ui-sans text-sm mb-5" style={{ color: "#F1E6D2" }}>
+      <h2 className="mb-2" style={{ color: "#173D29", fontSize: 24, fontWeight: 700 }}>Achados por Anilha</h2>
+      <p className="ui-sans text-sm mb-5" style={{ color: "#334155" }}>
         A equipe administrativa vê os dados reservados de quem encontrou, as fotos e as características informadas. Nos registros com anilha, também aparecem possíveis titulares dos anúncios aprovados. Nos casos sem anilha, a equipe faz a análise manual.
       </p>
       <div className="flex flex-wrap gap-2 mb-5">

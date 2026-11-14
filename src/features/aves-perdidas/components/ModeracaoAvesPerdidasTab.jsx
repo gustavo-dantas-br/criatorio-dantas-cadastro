@@ -13,10 +13,10 @@ export default function ModeracaoAvesPerdidasTab({ anuncios = [], onModerar }) {
 
   return (
     <section>
-      <h2 className="mb-2" style={{ color: "#F1E6D2", fontSize: 24, fontWeight: 700 }}>
+      <h2 className="mb-2" style={{ color: "#173D29", fontSize: 24, fontWeight: 700 }}>
         Moderação — aves perdidas
       </h2>
-      <p className="ui-sans text-sm mb-5" style={{ color: "#F1E6D2" }}>
+      <p className="ui-sans text-sm mb-5" style={{ color: "#334155" }}>
         Revise os anúncios enviados gratuitamente. Só os aprovados aparecem na página pública.
       </p>
       <div className="flex flex-wrap gap-2 mb-5">

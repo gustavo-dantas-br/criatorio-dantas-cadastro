@@ -15,6 +15,11 @@ export default function FormTab({ form, setForm, onSave, onPhoto, saving, machoO
   return (
     <div className="max-w-3xl">
       <SectionTitle>{form.id ? `Editando ${form.nome || "ave"}` : "Nova ave"}</SectionTitle>
+      <div className="rounded-xl p-3 mb-4" style={{ background: "#f5e9c8", border: "1px solid #dfcba7" }}>
+        <p className="text-sm" style={{ color: "#5e5143" }}>
+          Preencha o básico: nome, espécie e sexo. Escolha a cor ou aparência se souber. O restante é opcional e pode ser completado depois.
+        </p>
+      </div>
       <Card className="p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 mb-6">
           <div className="w-28 h-28 sm:w-32 sm:h-32 shrink-0 rounded-lg overflow-hidden flex items-center justify-center relative mx-auto sm:mx-0" style={{ background: "#f1e6d2", border: "1px dashed #d6c39a" }}>
@@ -37,98 +42,142 @@ export default function FormTab({ form, setForm, onSave, onPhoto, saving, machoO
             <Field label="Sexo">
               <select style={inputStyle} value={form.sexo} onChange={set("sexo")}>{SEXOS.map((s) => <option key={s}>{s}</option>)}</select>
             </Field>
-            <Field label="Mutacao / Cor">
-  <select
-    style={inputStyle}
-    value={mutacaoLivre ? "__outra__" : form.corMutacao}
-    onChange={(e) => {
-      if (e.target.value === "__outra__") {
-        setMutacaoLivre(true);
-        setForm((f) => ({ ...f, corMutacao: "" }));
-      } else {
-        setMutacaoLivre(false);
-        setForm((f) => ({ ...f, corMutacao: e.target.value }));
-      }
-    }}
-  >
-    <option value="">-- selecione --</option>
-    {mutacoes.map((m) => (
-      <option key={m.id} value={m.nome}>{m.nome}</option>
-    ))}
-    <option value="__outra__">Outra (digitar)</option>
-  </select>
-
-  {mutacaoLivre && (
-    <input
-      style={{ ...inputStyle, marginTop: 8 }}
-      value={form.corMutacao}
-      onChange={(e) => setForm((f) => ({ ...f, corMutacao: e.target.value }))}
-      placeholder="Digite a mutacao/cor dessa ave"
-    />
-  )}
-
-  {mutacoes.length === 0 && !mutacaoLivre && (
-    <div className="ui-sans text-xs mt-1" style={{ color: "#8a7a63" }}>
-      Nenhuma mutacao cadastrada ainda — cadastre em Genetica &gt; Mutacoes, ou escolha "Outra (digitar)".
-    </div>
-  )}
-</Field>
-
-<Field label="Portador de">
-  <div
-    className="rounded-xl p-3"
-    style={{
-      background: "#fffaf0",
-      border: "1px solid #d8c6a5",
-    }}
-  >
-    {mutacoes.length === 0 ? (
-      <div className="text-sm" style={{ color: "#8a7a63" }}>
-        Nenhuma mutacao cadastrada.
-      </div>
-    ) : (
-      <div className="space-y-2">
-        {mutacoes.map((mutacao) => {
-          const selecionado = (form.portadores || []).includes(mutacao.nome);
-
-          return (
-            <label
-              key={mutacao.id}
-              className="flex items-center gap-2 text-sm cursor-pointer"
-              style={{ color: "#4f4336" }}
-            >
-              <input
-                type="checkbox"
-                checked={selecionado}
+            <Field label="Cor / aparência da ave">
+              <select
+                style={inputStyle}
+                value={
+                  form.corMutacao === "Ino"
+                    ? (String(form.corBase || "").toLowerCase().includes("blue") ? "popular|Albino" : "popular|Lutino")
+                    : form.corMutacao === "Cremino"
+                      ? "popular|Cremino"
+                      : form.corMutacao
+                        ? (mutacaoLivre ? "__outra__" : form.corMutacao)
+                      : form.corBase || ""
+                }
                 onChange={(e) => {
-                  const atuais = form.portadores || [];
-
-                  const novos = e.target.checked
-                    ? [...new Set([...atuais, mutacao.nome])]
-                    : atuais.filter((nome) => nome !== mutacao.nome);
-
-                  setForm({
-                    ...form,
-                    portadores: novos,
-                  });
+                  const value = e.target.value;
+                  if (value === "__outra__") {
+                    setMutacaoLivre(true);
+                    setForm((f) => ({ ...f, corMutacao: "" }));
+                    return;
+                  }
+                  setMutacaoLivre(false);
+                  if (value.startsWith("popular|")) {
+                    const popular = value.split("|")[1];
+                    setForm((f) => ({
+                      ...f,
+                      corMutacao: popular === "Lutino" || popular === "Albino" ? "Ino" : popular,
+                      corBase: popular === "Lutino" ? "Green (Verde)" : popular === "Albino" ? "Blue (Azul)" : f.corBase || "",
+                    }));
+                  } else if (["Green (Verde)", "Blue (Azul)", "Turquoise (Turquesa)", "Turquoise Blue (Azul Turquesa)"].includes(value)) {
+                    setForm((f) => ({ ...f, corBase: value, corMutacao: "" }));
+                  } else {
+                    setForm((f) => ({ ...f, corMutacao: value }));
+                  }
                 }}
-              />
+              >
+                <option value="">Selecione se souber</option>
+                <optgroup label="Cores">
+                  <option value="Green (Verde)">Verde</option>
+                  <option value="Blue (Azul)">Azul</option>
+                  <option value="Turquoise (Turquesa)">Turquesa</option>
+                  <option value="Turquoise Blue (Azul Turquesa)">Azul turquesa</option>
+                </optgroup>
+                <optgroup label="Aparências conhecidas">
+                  <option value="popular|Lutino">Lutino</option>
+                  <option value="popular|Albino">Albino</option>
+                  <option value="popular|Cremino">Cremino</option>
+                  {mutacoes.filter((m) => !["Ino", "Pallid (Palido)"].includes(m.nome)).map((m) => (
+                    <option key={m.id || m.nome} value={m.nome}>{m.nome}</option>
+                  ))}
+                </optgroup>
+                <option value="__outra__">Outra (digitar)</option>
+              </select>
+              {mutacaoLivre && (
+                <input
+                  style={{ ...inputStyle, marginTop: 8 }}
+                  value={form.corMutacao || ""}
+                  onChange={(e) => setForm((f) => ({ ...f, corMutacao: e.target.value, corBase: "" }))}
+                  placeholder="Digite a cor ou mutação"
+                />
+              )}
+              <p className="text-xs mt-1" style={{ color: "#8a7a63" }}>
+                Escolha o nome que você usa para identificar a ave. Se não souber, deixe em branco.
+              </p>
+            </Field>
 
-              <span>{mutacao.nome}</span>
-            </label>
-          );
-        })}
-      </div>
-    )}
-  </div>
-
-  <p className="text-xs mt-2" style={{ color: "#8a7a63" }}>
-    Marque as mutacoes que a ave carrega sem apresentar visualmente.
-  </p>
-</Field>
+            <div className="sm:col-span-2 rounded-xl p-3" style={{ background: "#fffaf0", border: "1px solid #d8c6a5" }}>
+              <p className="cursor-pointer text-sm font-semibold" style={{ color: "#5e5143" }}>
+                Informações genéticas adicionais (opcional)
+              </p>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Cor de base (se souber)">
+                  <select style={inputStyle} value={form.corBase || ""} onChange={set("corBase")}>
+                    <option value="">Não informada</option>
+                    <option value="Green (Verde)">Verde</option>
+                    <option value="Blue (Azul)">Azul</option>
+                    <option value="Turquoise (Turquesa)">Turquesa</option>
+                    <option value="Turquoise Blue (Azul Turquesa)">Azul turquesa</option>
+                  </select>
+                </Field>
+                <Field label="Fator escuro (opcional)">
+                  <select style={inputStyle} value={form.fatoresGeneticos?.darkFactor || ""} onChange={(e) => setForm((f) => ({ ...f, fatoresGeneticos: { ...(f.fatoresGeneticos || {}), darkFactor: e.target.value } }))}>
+                    <option value="">Não informado</option><option value="SF">Simples (SF)</option><option value="DF">Duplo (DF)</option>
+                  </select>
+                  <p className="text-xs mt-1" style={{ color: "#8a7a63" }}>Modifica a intensidade da cor.</p>
+                </Field>
+                <Field label="Fator violeta (opcional)">
+                  <select style={inputStyle} value={form.fatoresGeneticos?.violetFactor || ""} onChange={(e) => setForm((f) => ({ ...f, fatoresGeneticos: { ...(f.fatoresGeneticos || {}), violetFactor: e.target.value } }))}>
+                    <option value="">Não informado</option><option value="SF">Simples (SF)</option><option value="DF">Duplo (DF)</option>
+                  </select>
+                  <p className="text-xs mt-1" style={{ color: "#8a7a63" }}>Modifica a tonalidade; não é uma cor-base.</p>
+                </Field>
+                <div className="sm:col-span-2">
+                  <Field label="Portadora de (somente se tiver certeza)">
+                    <div className="rounded-xl p-3" style={{ background: "#fffaf0", border: "1px solid #d8c6a5" }}>
+                      {mutacoes.filter((m) => m.permitePortador !== false && m.categoria !== "cor_base" && (!m.especie || m.especie === form.especie)).map((mutacao) => {
+                        const selecionado = (form.portadores || []).includes(mutacao.nome);
+                        return <label key={mutacao.id || mutacao.nome} className="flex items-center gap-2 text-sm py-1" style={{ color: "#4f4336" }}>
+                          <input type="checkbox" checked={selecionado} disabled={form.sexo === "Femea" && (mutacao.tipoHeranca || "").startsWith("Ligada ao sexo")} onChange={(e) => {
+                            const atuais = form.portadores || [];
+                            const novos = e.target.checked ? [...new Set([...atuais, mutacao.nome])] : atuais.filter((nome) => nome !== mutacao.nome);
+                            setForm((f) => ({ ...f, portadores: novos }));
+                          }} />
+                          <span>{mutacao.nome}</span>
+                        </label>;
+                      })}
+                    </div>
+                    <p className="text-xs mt-1" style={{ color: "#8a7a63" }}>Se não souber, não marque nada.</p>
+                  </Field>
+                </div>
+                <div className="sm:col-span-2">
+                  <Field label="Outras características visuais (opcional)">
+                    <div className="rounded-xl p-3 max-h-48 overflow-y-auto" style={{ background: "#fffaf0", border: "1px solid #d8c6a5" }}>
+                      {mutacoes.filter((m) => (!m.especie || m.especie === form.especie) && m.categoria !== "cor_base" && m.nome !== form.corMutacao).map((m) => {
+                        const marcado = (form.mutacoesVisuais || []).includes(m.nome);
+                        return <label key={m.id || m.nome} className="flex items-start gap-2 py-1.5 text-sm" style={{ color: "#4f4336" }}>
+                          <input type="checkbox" checked={marcado} onChange={(e) => setForm((f) => ({
+                            ...f,
+                            mutacoesVisuais: e.target.checked
+                              ? [...new Set([...(f.mutacoesVisuais || []), m.nome])]
+                              : (f.mutacoesVisuais || []).filter((nome) => nome !== m.nome),
+                          }))} />
+                          <span>{m.nome}</span>
+                        </label>;
+                      })}
+                    </div>
+                  </Field>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
+        <div className="mt-5 rounded-xl p-4" style={{ background: "#fffaf0", border: "1px solid #d8c6a5" }}>
+          <p className="cursor-pointer font-semibold text-sm" style={{ color: "#5e5143" }}>
+            Outras informações da ave (opcional)
+          </p>
+          <div className="mt-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <Field label="Numero da anilha"><input style={inputStyle} value={form.anilha} onChange={set("anilha")} placeholder="ex: FOB 0080" /></Field>
           <Field label="Cor da anilha"><input style={inputStyle} value={form.corAnilha} onChange={set("corAnilha")} placeholder="ex: azul 2024" /></Field>
@@ -242,7 +291,7 @@ export default function FormTab({ form, setForm, onSave, onPhoto, saving, machoO
               {femeaOptions.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
             </select>
           </Field>
-          <Field label="Mãe (não cadastrada)"><input style={inputStyle} value={form.maeExterno} onChange={set("maeExterno")} placeholder="Nome da mãe" /></Field>
+          <Field label="Mae (se nao estiver no sistema)"><input style={inputStyle} value={form.maeExterno} onChange={set("maeExterno")} placeholder="ex: emprestada do Anderson" /></Field>
           <Field label="Parceiro(a) / casal">
             <select style={inputStyle} value={form.parceiroId} onChange={set("parceiroId")}>
               <option value="">-- nenhum --</option>
@@ -255,6 +304,9 @@ export default function FormTab({ form, setForm, onSave, onPhoto, saving, machoO
         <div className="my-5 h-px" style={{ background: "#e3d3b4" }} />
         <div className="ui-mono text-xs mb-3" style={{ color: "#8a7a63" }}>HISTORICO DE PESO</div>
         <PesoHistorico inputStyle={inputStyle} pesos={form.pesos} onChange={(pesos) => setForm((f) => ({ ...f, pesos }))} />
+
+          </div>
+        </div>
 
         <div className="flex gap-3 mt-6">
           <button onClick={onSave} disabled={saving} className="ui-sans flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold" style={{ background: "#C69A2E", color: "#2B1D14" }}>

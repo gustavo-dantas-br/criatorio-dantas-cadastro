@@ -130,7 +130,7 @@ function FornecedorDetalhe({ fornecedor, historico, onBack, onEdit, onDelete, Ca
         </div>
       </Card>
 
-      <div className="ui-mono text-xs mb-3" style={{ color: "#F1E6D2" }}>HISTORICO DE COMPRAS</div>
+      <div className="ui-mono text-xs mb-3" style={{ color: "#173D29" }}>HISTORICO DE COMPRAS</div>
       {historico.compras.length === 0 ? (
         <Card className="p-6 text-center ui-sans" style={{ color: "#8a7a63" }}>
           Nenhuma compra encontrada com esse fornecedor ainda.

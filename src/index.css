@@ -17,3 +17,33 @@
 body {
   margin: 0;
 }
+
+
+/* Melhor contraste para textos secundários dentro do conteúdo dos painéis.
+   Mantém a paleta clara da navegação e dos blocos com fundo escuro. */
+main .text-slate-400,
+main .text-gray-400,
+main .text-zinc-400,
+main .text-stone-400 {
+  color: #64748b !important;
+}
+
+main .text-slate-500,
+main .text-gray-500,
+main .text-zinc-500,
+main .text-stone-500 {
+  color: #475569 !important;
+}
+
+main .text-slate-600,
+main .text-gray-600,
+main .text-zinc-600,
+main .text-stone-600 {
+  color: #334155 !important;
+}
+
+main input::placeholder,
+main textarea::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
