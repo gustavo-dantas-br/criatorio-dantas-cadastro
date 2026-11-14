@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { calcularCruzamentoGenetico } from "../utils/calcularCruzamentoGenetico";
+import { genotipoSerieDaAve, cruzarSerieCor, dosagemFator, cruzarDosagemFator } from "../utils/serieCorRingNeck";
 
 const campo = {
   border: "1px solid #d8c6a5",
@@ -53,6 +54,15 @@ export default function CalculadoraGenetica({ aves, mutacoes }) {
     const paiParaCalculo = { ...pai, corMutacao: pai.corMutacao || pai.corLivre || "" };
     const maeParaCalculo = { ...mae, corMutacao: mae.corMutacao || mae.corLivre || "" };
     const calc = calcularCruzamentoGenetico(paiParaCalculo, maeParaCalculo, mutacoesRingNeck);
+    const genotipoPai = genotipoSerieDaAve(paiParaCalculo);
+    const genotipoMae = genotipoSerieDaAve(maeParaCalculo);
+    const serieCor = genotipoPai && genotipoMae ? cruzarSerieCor(genotipoPai, genotipoMae) : null;
+    const fatores = ["darkFactor", "violetFactor"].map((chave) => {
+      const nome = chave === "darkFactor" ? "Dark Factor (Fator escuro)" : "Violet Factor (Fator violeta)";
+      const dosePai = dosagemFator(paiParaCalculo.fatoresGeneticos?.[chave]);
+      const doseMae = dosagemFator(maeParaCalculo.fatoresGeneticos?.[chave]);
+      return { nome, resultados: cruzarDosagemFator(dosePai, doseMae, nome), conhecido: dosePai !== null && doseMae !== null };
+    });
     if (calc.semLociRelevantes) {
       const detalhes = [
         calc.bloqueadas?.length ? "Ainda estamos validando: " + calc.bloqueadas.join(", ") + "." : "",
@@ -107,6 +117,10 @@ export default function CalculadoraGenetica({ aves, mutacoes }) {
       tipo: "sucesso",
       cruzamento: `${pai.nome || "Pai"} × ${mae.nome || "Mãe"}`,
       genotipos: calc.lociConsiderados.join(", "),
+      serieCor,
+      genotipoPai,
+      genotipoMae,
+      fatores,
       possibilidades,
       explicacoes,
       observacoes,
@@ -250,7 +264,7 @@ export default function CalculadoraGenetica({ aves, mutacoes }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <label className="text-sm" style={{ color: "#5e5143" }}>Fator escuro
                     <select className="w-full rounded-xl px-3 py-2 mt-1" style={campo} value={manual.fatoresGeneticos?.darkFactor || ""} onChange={(e) => setManual((v) => ({ ...v, fatoresGeneticos: { ...(v.fatoresGeneticos || {}), darkFactor: e.target.value } }))}>
-                      <option value="">Não sei</option><option value="SF">Simples (SF)</option><option value="DF">Duplo (DF)</option>
+                      <option value="">Não sei</option><option value="NONE">Sem fator (confirmado)</option><option value="SF">Simples (SF)</option><option value="DF">Duplo (DF)</option>
                     </select>
                   </label>
                   <label className="text-sm" style={{ color: "#5e5143" }}>Fator violeta
@@ -306,6 +320,23 @@ export default function CalculadoraGenetica({ aves, mutacoes }) {
           <div className="text-xs font-semibold mb-2" style={{ color: "#8a7a63" }}>POSSIBILIDADES TEÓRICAS</div>
           <div className="text-xl font-semibold" style={{ color: "#2B241C" }}>{resultado.cruzamento}</div>
           <div className="mt-2 text-sm" style={{ color: "#8a7a63" }}>Características consideradas: {resultado.genotipos || "—"}</div>
+
+          {resultado.serieCor ? (
+            <div className="mt-4 rounded-xl p-4" style={{ background: "#fffaf0", border: "1px solid #dfcba7" }}>
+              <div className="font-semibold text-sm mb-2" style={{ color: "#2B241C" }}>Série de cor — Ring Neck</div>
+              <p className="text-xs mb-3" style={{ color: "#8a7a63" }}>Genótipos considerados: pai {resultado.genotipoPai.join("/")}; mãe {resultado.genotipoMae.join("/")}</p>
+              <div className="space-y-2">{resultado.serieCor.map((item) => <div key={item.genotipo} className="flex justify-between gap-3 text-sm" style={{ color: "#5e5143" }}><span>{item.nome} · {item.genotipo}</span><strong>{item.percentual}%</strong></div>)}</div>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-xl p-3 text-xs" style={{ background: "#fffaf0", color: "#8a7a63" }}>Série de cor não calculada: falta confirmar o genótipo de um ou dos dois pais. Uma ave verde pode carregar azul ou turquesa; a aparência sozinha não confirma G/G.</div>
+          )}
+          <div className="mt-3 rounded-xl p-4" style={{ background: "#fffaf0", border: "1px solid #dfcba7" }}>
+            <div className="font-semibold text-sm mb-2" style={{ color: "#2B241C" }}>Fatores Dark e Violet</div>
+            {resultado.fatores.map((fator) => <div key={fator.nome} className="mb-2">
+              <div className="text-sm font-medium" style={{ color: "#5e5143" }}>{fator.nome}</div>
+              {fator.conhecido && fator.resultados.length ? fator.resultados.map((r) => <div key={r.dosagem} className="flex justify-between text-xs mt-1" style={{ color: "#6f6254" }}><span>{r.nome}</span><strong>{r.percentual}%</strong></div>) : <p className="text-xs" style={{ color: "#8a7a63" }}>Não calculado: informe a dosagem dos dois pais, inclusive “sem fator” quando confirmada.</p>}
+            </div>)}
+          </div>
           <div className="mt-4 space-y-3">{resultado.possibilidades.map((item, index) => <div key={`${item.nome}-${item.detalhe}-${index}`} className="flex items-center justify-between rounded-xl px-4 py-3 gap-3" style={{ background: "#f2e8d4", border: "1px solid #dfcba7" }}>
             <div><div className="font-semibold">{item.nome}</div><div className="text-xs mt-1" style={{ color: "#8a7a63" }}>{item.detalhe}</div></div><span className="font-semibold">{item.percentual}</span>
           </div>)}</div>
