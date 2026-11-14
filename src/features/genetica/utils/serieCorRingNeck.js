@@ -57,7 +57,7 @@ export function genotipoSerieDaAve(ave = {}) {
     if (carregaT && carregaB) return null;
     if (carregaT) return ["G", "T"];
     if (carregaB) return ["G", "B"];
-    return ["G", "G"];
+    return null;
   }
   return null;
 }
